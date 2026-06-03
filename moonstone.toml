@@ -1,0 +1,16 @@
+[package]
+name = "ballad"
+version = "0.1.3"
+kind = "script"
+
+[runtime]
+name = "luajit"
+version = "2.1.0"
+abi = "5.1"
+
+[dependencies.libs]
+"dkjson" = "rocks:dkjson@^2.9-1"
+
+[scripts]
+"export" = "lua src/main.lua \"$@\""
+"help" = "lua src/main.lua --help"
