@@ -70,6 +70,18 @@ local function write_lua_runner(output, main_script)
 	fs.write_file(path.join(output, "run.lua"), table.concat(content, "\n"))
 end
 
+local function is_runtime_package(package)
+	if not package then return true end
+	if not package.groups then return true end
+	if #package.groups == 0 then return true end
+	for _, g in ipairs(package.groups) do
+		if g == "libs" or g == "bins" then
+			return true
+		end
+	end
+	return false
+end
+
 function exporter.export(options)
 	local loaded = project_mod.load(options.project)
 
@@ -125,9 +137,12 @@ function exporter.export(options)
 				local relative_path = path.relative(module_path, module_root)
 				local source = fs.readlink(module_path)
 				local package = lockfile.package_for_source(packages, source)
-				local destination = options.layout == "love" and relative_path or path.join("lua", relative_path)
-
-				add_file(graph, destinations, source, destination, "package", package)
+				if not is_runtime_package(package) then
+					-- skip dev-only packages
+				else
+					local destination = options.layout == "love" and relative_path or path.join("lua", relative_path)
+					add_file(graph, destinations, source, destination, "package", package)
+				end
 			end
 		end
 	end
@@ -140,9 +155,12 @@ function exporter.export(options)
 				local relative_path = path.relative(module_path, lib_module_root)
 				local source = fs.readlink(module_path)
 				local package = lockfile.package_for_source(packages, source)
-				local destination = options.layout == "love" and relative_path or path.join("lib", relative_path)
-
-				add_file(graph, destinations, source, destination, "package", package)
+				if not is_runtime_package(package) then
+					-- skip dev-only packages
+				else
+					local destination = options.layout == "love" and relative_path or path.join("lib", relative_path)
+					add_file(graph, destinations, source, destination, "package", package)
+				end
 			end
 		end
 	end
