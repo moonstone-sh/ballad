@@ -80,4 +80,10 @@ function fs.is_binary_module(file_path)
   return ext == "so" or ext == "dylib" or ext == "dll"
 end
 
+function fs.chmod(file_path, mode)
+  if not process.command_ok("chmod " .. process.quote(mode) .. " " .. process.quote(file_path)) then
+    process.fail("cannot chmod " .. file_path .. " to " .. mode)
+  end
+end
+
 return fs

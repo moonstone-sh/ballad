@@ -7,6 +7,33 @@ local lockfile = require("ballad.lockfile")
 
 local exporter = {}
 
+local function run_hook(ctx, hook_name, ...)
+	for _, plugin in ipairs(ctx.plugins) do
+		if plugin[hook_name] then
+			local res = plugin[hook_name](ctx, ...)
+			if res ~= nil then
+				return res
+			end
+		end
+	end
+end
+
+local function run_transform_hook(ctx, hook_name, task)
+	local current_task = task
+	for _, plugin in ipairs(ctx.plugins) do
+		if plugin[hook_name] then
+			local res = plugin[hook_name](ctx, current_task)
+			if res == false then
+				return false
+			elseif type(res) == "table" then
+				current_task = res
+				current_task.plugin = current_task.plugin or plugin.name
+			end
+		end
+	end
+	return current_task
+end
+
 local function should_skip_project_file(relative_path, output_relative)
 	if relative_path:match("^%.git/") or relative_path:match("^%.moonstone/") or relative_path:match("^dist/") then
 		return true
@@ -25,26 +52,42 @@ local function should_skip_project_file(relative_path, output_relative)
 	return not (fs.is_lua(relative_path) or fs.is_binary_module(relative_path))
 end
 
-local function add_file(graph, destinations, source, destination, kind, package)
+local function add_file(graph, destinations, task)
+	local destination = task.dest or task.destination
+	local source = task.src or task.source
+	local kind = task.kind
+	local package = task.package
+
 	if destinations[destination] then
 		process.fail(
-			"destination collision for " .. destination .. " from " .. source .. " and " .. destinations[destination]
+			"destination collision for " .. destination .. " from " .. (source or "generated") .. " and " .. destinations[destination]
 		)
 	end
 
-	destinations[destination] = source
+	destinations[destination] = source or "generated"
 
-	fs.copy_file(source, path.join(graph.output, destination))
+	if kind == "generated" then
+		fs.mkdir(path.dirname(path.join(graph.output, destination)))
+		fs.write_file(path.join(graph.output, destination), task.content)
+	else
+		fs.copy_file(source, path.join(graph.output, destination))
+	end
+
+	local mod_dest = destination
+	if mod_dest:match("^libexec/[^/]+/") then
+		mod_dest = mod_dest:gsub("^libexec/[^/]+/", "")
+	end
 
 	graph.files[#graph.files + 1] = {
-		destination = destination,
+		src = source,
+		dest = destination,
 		kind = kind,
 		module = (fs.is_lua(destination) or fs.is_binary_module(destination))
-				and path.module_name(destination:gsub("^lua/", ""):gsub("^lib/", ""):gsub("^project/src/", ""))
+				and path.module_name(mod_dest:gsub("^lua/", ""):gsub("^lib/", ""):gsub("^project/src/", ""):gsub("^src/", ""))
 			or nil,
-		package = package and package.name or nil,
-		artifact_hash = package and package.artifact_hash or nil,
-		source = source,
+		package = type(package) == "table" and package.name or package,
+		artifact_hash = type(package) == "table" and package.artifact_hash or nil,
+		plugin = task.plugin,
 	}
 end
 
@@ -99,6 +142,19 @@ function exporter.export(options)
 	fs.remove_tree(output)
 	fs.mkdir(output)
 
+	local plugins = {}
+	for _, spec in ipairs(options.plugins or {}) do
+		local name = spec.name
+		local mod_name = name:find("%.") and name or ("ballad.plugins." .. name)
+		local ok, plugin = pcall(require, mod_name)
+		if not ok then
+			process.fail("failed to load plugin " .. name .. ": " .. tostring(plugin))
+		end
+		plugin.name = name
+		plugin.params = spec.params or {}
+		table.insert(plugins, plugin)
+	end
+
 	local graph = {
 		format = "ballad-file-graph-v1",
 		layout = options.layout,
@@ -118,14 +174,104 @@ function exporter.export(options)
 		files = {},
 	}
 
+	local host_target = process.capture("uname -sm | tr '[:upper:]' '[:lower:]'"):gsub("%s+", "-"):gsub("x86_64", "x86_64"):gsub("arm64", "aarch64")
+
 	local destinations = {}
+	local ctx = {
+		host = {
+			target = host_target,
+			runtime = env.runtime.name .. "@" .. env.runtime.version,
+		},
+		project = {
+			root = project_root,
+			name = manifest.package and manifest.package.name or path.basename(project_root),
+			version = manifest.package and manifest.package.version or "0.0.0",
+			runtime = env.runtime.name .. "@" .. env.runtime.version,
+			lua_abi = abi,
+		},
+		export = {
+			mode = "agnostic",
+			target = "any",
+			runtime = env.runtime.name .. "@" .. env.runtime.version,
+		},
+		project_root = project_root,
+		out_dir = output,
+		layout = options.layout,
+		options = options,
+		graph = graph,
+		plugins = plugins,
+		manifest = manifest,
+		packages = packages,
+		env = env,
+		emit_file = function(task)
+			add_file(graph, destinations, task)
+		end,
+		add_generated_file = function(dest, content, plugin_name)
+			add_file(graph, destinations, {
+				dest = dest,
+				kind = "generated",
+				content = content,
+				plugin = plugin_name,
+			})
+		end,
+		warn = function(msg)
+			print("Warning: " .. msg)
+		end,
+		fail = function(msg)
+			process.fail(msg)
+		end,
+		chmod = function(dest, mode)
+			fs.chmod(path.join(output, dest), mode)
+		end,
+		moonstone = {
+			get_project_runtime = function()
+				local json_path = path.join(project_root, ".moonstone/env/runtime.json")
+				local f = io.open(json_path, "r")
+				if f then
+					local content = f:read("*a")
+					f:close()
+					return dkjson.decode(content)
+				end
+				return nil
+			end,
+			get_runtime_artifact = function(_, query)
+				local spec = query.name
+				if query.version then spec = spec .. "@" .. query.version end
+				local cmd = "moon runtime path " .. process.quote(spec) .. " --json"
+				if query.target then
+					cmd = cmd .. " --target " .. process.quote(query.target)
+				end
+				local res = process.capture(cmd)
+				if res:sub(1, 1) == "{" then
+					return dkjson.decode(res)
+				end
+				return nil
+			end,
+		},
+	}
+
+	run_hook(ctx, "on_init")
 
 	for _, source in ipairs(fs.list_files(project_root)) do
 		local relative_path = path.relative(source, project_root)
 
 		if not should_skip_project_file(relative_path, output_relative) then
 			local destination = options.layout == "love" and relative_path or path.join("project", relative_path)
-			add_file(graph, destinations, source, destination, "project", nil)
+			local task = run_transform_hook(ctx, "on_add_file", {
+				src = source,
+				dest = destination,
+				kind = "project",
+			})
+
+			if task then
+				if task[1] then
+					for _, subtask in ipairs(task) do
+						add_file(graph, destinations, subtask)
+					end
+				else
+					add_file(graph, destinations, task)
+				end
+			end
 		end
 	end
 
@@ -141,7 +287,22 @@ function exporter.export(options)
 					-- skip dev-only packages
 				else
 					local destination = options.layout == "love" and relative_path or path.join("lua", relative_path)
-					add_file(graph, destinations, source, destination, "package", package)
+					local task = run_transform_hook(ctx, "on_add_file", {
+						src = source,
+						dest = destination,
+						kind = "package",
+						package = package,
+					})
+
+					if task then
+						if task[1] then
+							for _, subtask in ipairs(task) do
+								add_file(graph, destinations, subtask)
+							end
+						else
+							add_file(graph, destinations, task)
+						end
+					end
 				end
 			end
 		end
@@ -159,14 +320,31 @@ function exporter.export(options)
 					-- skip dev-only packages
 				else
 					local destination = options.layout == "love" and relative_path or path.join("lib", relative_path)
-					add_file(graph, destinations, source, destination, "package", package)
+					local task = run_transform_hook(ctx, "on_add_file", {
+						src = source,
+						dest = destination,
+						kind = "package",
+						package = package,
+					})
+
+					if task then
+						if task[1] then
+							for _, subtask in ipairs(task) do
+								add_file(graph, destinations, subtask)
+							end
+						else
+							add_file(graph, destinations, task)
+						end
+					end
 				end
 			end
 		end
 	end
 
+	run_hook(ctx, "on_finalize")
+
 	table.sort(graph.files, function(left, right)
-		return left.destination < right.destination
+		return left.dest < right.dest
 	end)
 
 	table.sort(graph.selected_packages, function(left, right)
