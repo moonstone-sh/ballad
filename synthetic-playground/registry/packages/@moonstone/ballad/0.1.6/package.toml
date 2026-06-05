@@ -1,0 +1,26 @@
+[package]
+name = "@moonstone/ballad"
+version = "0.1.6"
+kind = "bin"
+description = "Deterministic Lua project exporter and bundler for Moonstone"
+
+[[artifacts]]
+id = "bin-any"
+kind = "bin"
+target = "any"
+lua_abi = "5.1"
+format = "tar.gz"
+url = "blobs/b3/1c/df/1cdf6b00d16c694f97fc11202aada96d72c8428344fdf351d4695f05ec5a1b5c.tar.gz"
+hash = "b3:1cdf6b00d16c694f97fc11202aada96d72c8428344fdf351d4695f05ec5a1b5c"
+recipe_hash = "b3:9a1e9b50a83152df7bdaa82cb655669bd8517df2f3bbfc197ac848ef715563d4"
+bytes = 17461
+
+runtime = "luajit@2.1.0"
+[artifacts.materialize]
+type = "archive"
+strip_components = 0
+
+[[artifacts.provides]]
+kind = "bin"
+name = "ballad"
+path = "bin/ballad"
