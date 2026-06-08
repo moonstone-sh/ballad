@@ -1,8 +1,13 @@
 local pipeline = require("ballad.pipeline")
 local plugin_host = require("ballad.plugin_host")
 
+---@alias PartitureFn fun(ctx: PipelineContext): any
+
 local partiture = {}
 
+---@param fn PartitureFn
+---@param jobs? integer
+---@return Pipeline
 function partiture.build(fn, jobs)
   local host = plugin_host.new()
   local p = pipeline.new(host, jobs)
@@ -13,6 +18,9 @@ function partiture.build(fn, jobs)
   return p
 end
 
+---@param filepath string
+---@param jobs? integer
+---@return Pipeline
 function partiture.load(filepath, jobs)
   local chunk, err = loadfile(filepath)
   if not chunk then
@@ -28,6 +36,8 @@ function partiture.load(filepath, jobs)
   return partiture.build(result, jobs)
 end
 
+---@param fn PartitureFn
+---@return PartitureFn
 function partiture.partiture(fn)
   return fn
 end

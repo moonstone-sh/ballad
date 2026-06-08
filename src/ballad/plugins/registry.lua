@@ -83,7 +83,7 @@ function registry.on_finalize(ctx)
 
 	if target == "any" then
 		if ctx.export.runtime then
-			runtime_field = string.format('\nruntime = "%s"', ctx.export.runtime)
+			runtime_field = string.format('runtime = "%s"', ctx.export.runtime)
 		end
 		provides_section = [=[
 [[artifacts.provides]]
@@ -221,11 +221,14 @@ registry.package = function(ctx, inputs, opts)
 		blob_bytes = f:seek("end")
 		f:close()
 	end
+	local bin_name = meta.bin_name or meta.name or "app"
+	local libexec_root = meta.libexec_root or ""
+	local entry_prefix = libexec_root ~= "" and libexec_root .. "/" or ""
 	local provides_list = {}
 	if target == "any" then
-		table.insert(provides_list, "bin_lua:" .. meta.bin_name .. ":" .. meta.libexec_root .. "/" .. meta.entry)
+		table.insert(provides_list, "bin_lua:" .. bin_name .. ":" .. entry_prefix .. meta.entry)
 	else
-		table.insert(provides_list, "bin:" .. meta.bin_name .. ":bin/" .. meta.bin_name)
+		table.insert(provides_list, "bin:" .. bin_name .. ":bin/" .. bin_name)
 	end
 	local recipe_text = table.concat({
 		"schema=moonstone.recipe.v0",
@@ -242,25 +245,26 @@ registry.package = function(ctx, inputs, opts)
 	local url = string.format("blobs/b3/%s/%s/%s.tar.gz", digest:sub(1, 2), digest:sub(3, 4), digest)
 	local runtime_field = ""
 	if runtime then
-		runtime_field = string.format('\nruntime = "%s"', runtime)
+		runtime_field = string.format('runtime = "%s"', runtime)
 	end
 	local provides_section = ""
+	local entry_point_path = entry_prefix .. meta.entry
 	if target == "any" then
 		provides_section = table.concat({
 			"",
 			"[[artifacts.provides]]",
 			'kind = "bin_lua"',
-			'name = "' .. meta.bin_name .. '"',
-			'path = "bin/' .. meta.bin_name .. '"',
-			'entry_point = "' .. meta.libexec_root .. "/" .. meta.entry .. '"',
+			'name = "' .. bin_name .. '"',
+			'path = "bin/' .. bin_name .. '"',
+			'entry_point = "' .. entry_point_path .. '"',
 		}, "\n")
 	else
 		provides_section = table.concat({
 			"",
 			"[[artifacts.provides]]",
 			'kind = "bin"',
-			'name = "' .. meta.bin_name .. '"',
-			'path = "bin/' .. meta.bin_name .. '"',
+			'name = "' .. bin_name .. '"',
+			'path = "bin/' .. bin_name .. '"',
 		}, "\n")
 	end
 
@@ -292,14 +296,19 @@ registry.package = function(ctx, inputs, opts)
 	end
 	local dependency_section = table.concat(dependency_sections, "\n")
 
-	local package_toml = table.concat({
+	local package_lines = {
 		"[package]",
 		'name = "' .. pkg_name .. '"',
 		'version = "' .. version .. '"',
 		'kind = "' .. (opts.kind or meta.kind or "bin") .. '"',
 		'description = "Exported ' .. pkg_name .. ' package"',
-		dependency_section,
 		"",
+	}
+	if dependency_section ~= "" then
+		table.insert(package_lines, dependency_section)
+		table.insert(package_lines, "")
+	end
+	for _, line in ipairs({
 		"[[artifacts]]",
 		'id = "' .. (opts.artifact_kind or meta.artifact_kind or "bin") .. "-" .. target .. '"',
 		'kind = "' .. (opts.artifact_kind or meta.artifact_kind or "bin") .. '"',
@@ -311,14 +320,23 @@ registry.package = function(ctx, inputs, opts)
 		'hash = "' .. blob_hash .. '"',
 		'recipe_hash = "' .. recipe_hash .. '"',
 		"bytes = " .. tostring(blob_bytes),
+	}) do
+		table.insert(package_lines, line)
+	end
+	if runtime_field ~= "" then
+		table.insert(package_lines, "")
+		table.insert(package_lines, runtime_field)
+	end
+	for _, line in ipairs({
 		"",
 		"[artifacts.materialize]",
 		'type = "archive"',
 		"strip_components = 0",
-		(meta.layout and ('\nlayout = "' .. meta.layout .. '"') or ""),
-		runtime_field,
 		provides_section,
-	}, "\n")
+	}) do
+		table.insert(package_lines, line)
+	end
+	local package_toml = table.concat(package_lines, "\n") .. "\n"
 	fs.write_file(path.join(artifact_dir, "package.toml"), package_toml)
 	local publish_lines = {
 		"#!/usr/bin/env sh",

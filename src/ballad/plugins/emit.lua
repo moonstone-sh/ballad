@@ -1,6 +1,7 @@
 local graph = require("ballad.graph")
 local fs = require("ballad.fs")
 local path = require("ballad.path")
+local process = require("ballad.process")
 
 return {
   name = "ballad.plugins.emit",
@@ -33,32 +34,53 @@ return {
     local dest = opts.out or opts.dir or "dist"
     print("Emitting to directory: " .. dest)
 
-    -- Build file-graph.json if requested
-    if opts.file_graph then
-      local file_graph = {
-        version = 1,
-        generated_by = "ballad",
-        files = {},
-      }
-      -- Collect assets from all executed nodes in the graph
-      for _, node in pairs(ctx.graph.nodes) do
-        if node.result and getmetatable(node.result) == graph.AssetSet then
-          for _, asset in ipairs(node.result.assets) do
-            if asset.virtual_path then
-              local entry = {
-                kind = asset.generated and "generated" or "copy",
-                source = asset.source_path or nil,
-                dest = asset.virtual_path,
-              }
-              if asset.metadata and asset.metadata.plugin then
-                entry.plugin = asset.metadata.plugin
-                entry.method = asset.metadata.method
-              end
-              table.insert(file_graph.files, entry)
+    fs.mkdir(dest)
+    if opts.clean ~= false then
+      local preserve = path.join(dest, "ballad/registry-artifact")
+      process.command_ok(
+        "find " .. process.quote(dest) .. " -mindepth 1 -path " .. process.quote(preserve) .. " -prune -o -exec rm -rf {} +"
+      )
+      fs.mkdir(dest)
+    end
+
+    -- Collect and emit only the final input asset set. Earlier pipeline nodes may
+    -- contain intermediate duplicates that should not leak into the export.
+    local file_graph = {
+      version = 1,
+      generated_by = "ballad",
+      layout = files_result.metadata and files_result.metadata.layout or "unknown",
+      files = {},
+    }
+    for _, asset in ipairs(inputs[1].assets) do
+      if asset.virtual_path and asset.kind ~= "files" then
+        local entry = {
+          kind = asset.generated and "generated" or "copy",
+          source = asset.source_path or nil,
+          dest = asset.virtual_path,
+        }
+        if asset.metadata and asset.metadata.plugin then
+          entry.plugin = asset.metadata.plugin
+          entry.method = asset.metadata.method
+        end
+        table.insert(file_graph.files, entry)
+
+        if asset.kind == "project" or asset.kind == "package" or asset.kind == "file" or asset.kind == "generated" or asset.kind == "runtime" then
+          local out_path = path.join(dest, asset.virtual_path)
+          fs.mkdir(path.dirname(out_path))
+          if asset.generated and asset.content then
+            fs.write_file(out_path, asset.content)
+            if asset.content:match("^#!") then
+              fs.chmod(out_path, "+x")
             end
+          elseif asset.source_path then
+            fs.copy_file(asset.source_path, out_path)
           end
         end
       end
+    end
+
+    -- Build file-graph.json if requested
+    if opts.file_graph then
       local fg_path = path.join(dest, "file-graph.json")
       fs.mkdir(path.dirname(fg_path))
       fs.write_file(fg_path, require("dkjson").encode(file_graph) .. "\n")
@@ -70,7 +92,7 @@ return {
       kind = "emit",
       virtual_path = dest,
       output_path = dest,
-      metadata = { kind = "directory", root = files_result.output_path },
+      metadata = { kind = "directory", root = files_result.output_path or dest },
     }))
     return assets
   end,

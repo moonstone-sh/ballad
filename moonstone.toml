@@ -1,18 +1,16 @@
 [package]
-name = "ballad"
-version = "0.1.3"
+name = "moonstone/ballad"
+version = "0.2.2"
 kind = "script"
+description = "Deterministic Lua project exporter and bundler for Moonstone"
 
 [runtime]
-name = "luajit"
+name = "moonstone/luajit"
 version = "2.1.0"
 abi = "5.1"
 
-[dependencies.libs]
+[dependencies.runtime]
 "dkjson" = "rocks:dkjson@^2.9-1"
-
-[dependencies.dev_bins]
-"@moonstone/ballad" = "^0.1.3"
 
 [scripts]
 "export" = "lua src/main.lua \"$@\""

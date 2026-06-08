@@ -103,6 +103,16 @@ end
 
 -- Compute a stable cache key for a native task
 function cache.compute_native_key(opts, plugin_name, method_name)
+  local input_hashes = {}
+  for _, input in ipairs(opts.inputs or {}) do
+    local content = fs.read_file(input)
+    table.insert(input_hashes, {
+      path = input,
+      hash = content and process.b3sum_string(content) or "missing",
+    })
+  end
+  table.sort(input_hashes, function(a, b) return a.path < b.path end)
+
   local key_data = {
     cache_version = CACHE_VERSION,
     kind = "native",
@@ -112,6 +122,7 @@ function cache.compute_native_key(opts, plugin_name, method_name)
     args = opts.args,
     cwd = opts.cwd,
     env = opts.env,
+    input_hashes = input_hashes,
     outputs = opts.outputs,
   }
 

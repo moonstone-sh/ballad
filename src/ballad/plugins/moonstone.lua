@@ -8,7 +8,7 @@ return {
     project = {
       inputs = {},
       outputs = { "asset_set" },
-      cacheable = true,
+      cacheable = false,
       parallel_safe = true,
     },
   },
@@ -50,17 +50,36 @@ return {
     local root = opts.root or "."
     local loaded = project_mod.load(root)
 
-    -- Build role-grouped dependency map from flat manifest.dependencies
+    -- Build role-grouped dependency map from flat or role-table manifest.dependencies
     local dep_roles = { dev = {}, tool = {}, runtime = {}, helper = {}, peer = {}, optional = {} }
     if loaded.manifest and loaded.manifest.dependencies then
-      for _, dep in ipairs(loaded.manifest.dependencies) do
-        local role = dep.role or "runtime"
-        if dep_roles[role] then
-          dep_roles[role][dep.name] = {
-            constraint = dep.constraint or "*",
-            resolver = dep.resolver or nil,
-            optional = dep.optional or false,
-          }
+      if #loaded.manifest.dependencies > 0 then
+        for _, dep in ipairs(loaded.manifest.dependencies) do
+          local role = dep.role or "runtime"
+          if dep_roles[role] then
+            dep_roles[role][dep.name] = {
+              constraint = dep.constraint or "*",
+              resolver = dep.resolver or nil,
+              optional = dep.optional or false,
+            }
+          end
+        end
+      else
+        for role, deps in pairs(loaded.manifest.dependencies) do
+          local normalized_role = role
+          if role == "libs" then normalized_role = "runtime" end
+          if role == "bins" then normalized_role = "helper" end
+          if role == "dev_libs" then normalized_role = "dev" end
+          if role == "dev_bins" then normalized_role = "tool" end
+          if dep_roles[normalized_role] and type(deps) == "table" then
+            for dep_name, spec in pairs(deps) do
+              dep_roles[normalized_role][dep_name] = {
+                constraint = tostring(spec),
+                resolver = tostring(spec):match("^([^:]+):") or nil,
+                optional = normalized_role == "optional",
+              }
+            end
+          end
         end
       end
     end

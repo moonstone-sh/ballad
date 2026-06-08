@@ -9,12 +9,12 @@ rm -rf dist/ballad
 luajit src/main.lua play partiture.lua
 PKG_VERSION=$(grep '^version' dist/ballad/registry-artifact/package.toml | head -1)
 echo "package.toml version line: $PKG_VERSION"
-echo "$PKG_VERSION" | grep -q '0.1.16' || { echo "FAIL: version mismatch"; exit 1; }
+echo "$PKG_VERSION" | grep -q '0.2.0' || { echo "FAIL: version mismatch"; exit 1; }
 echo "PASS: version matches moonstone.toml"
 
 echo ""
 echo "=== Test 2: no hardcoded version ==="
-if grep -q 'version = "0.1.16"' partiture.lua; then
+if grep -q 'version = "0.2.0"' partiture.lua; then
   echo "FAIL: partiture.lua still hardcodes version"
   exit 1
 fi
@@ -29,6 +29,46 @@ test -f ".ballad/runs/$LATEST_RUN/graph.json" || { echo "FAIL: graph.json missin
 cat dist/ballad/file-graph.json | jq -e '.files[] | select(.dest == "bin/ballad")' > /dev/null || { echo "FAIL: bin/ballad missing from file-graph.json"; exit 1; }
 cat dist/ballad/file-graph.json | jq -e '.files[] | select(.dest == "libexec/ballad/src/main.lua")' > /dev/null || { echo "FAIL: libexec/ballad/src/main.lua missing from file-graph.json"; exit 1; }
 echo "PASS: file-graph.json and graph.json both exist with expected entries"
+
+echo ""
+echo "=== Test 3b: flat layout ==="
+cd /Users/extrordinaire/Workbench/user/ballad
+cat > /tmp/test_flat.lua << 'LUAEOF'
+local ballad = require("ballad")
+return ballad.partiture(function(p)
+  local moonstone = p:use(ballad.plugins.moonstone)
+  local layout = p:use(ballad.plugins.layout)
+  local registry = p:use(ballad.plugins.registry)
+  local emit = p:use(ballad.plugins.emit)
+
+  local project = moonstone.project({ root = "." })
+  local app = layout.flat(project, {
+    name = "ballad",
+    entry = "src/main.lua",
+  })
+  registry.package(app, {
+    name = project.registry_name or "moonstone/ballad",
+    version = project.version,
+    target = "any",
+    runtime = project.runtime or "luajit@2.1.0",
+    lua_abi = project.lua_abi or "5.1",
+    description = project.description,
+  })
+  emit.directory(app, {
+    out = "dist/flat-root",
+    file_graph = true,
+  })
+end)
+LUAEOF
+rm -rf dist/flat-root
+luajit src/main.lua play /tmp/test_flat.lua > /tmp/flat_test.log 2>&1
+test -f dist/flat-root/src/main.lua || { echo "FAIL: dist/flat-root/src/main.lua missing"; cat /tmp/flat_test.log; exit 1; }
+test -d dist/flat-root/lua || { echo "FAIL: dist/flat-root/lua missing"; cat /tmp/flat_test.log; exit 1; }
+! test -f dist/flat-root/bin/ballad || { echo "FAIL: flat layout should not create launcher"; exit 1; }
+cat dist/flat-root/file-graph.json | jq -e '.layout == "flat"' > /dev/null || { echo "FAIL: file-graph layout is not flat"; exit 1; }
+cat dist/flat-root/file-graph.json | jq -e '.files[] | select(.dest == "src/main.lua")' > /dev/null || { echo "FAIL: src/main.lua missing from file-graph"; exit 1; }
+cat dist/flat-root/file-graph.json | jq -e '.files[] | select(.dest | startswith("lua/"))' > /dev/null || { echo "FAIL: lua modules missing from file-graph"; exit 1; }
+echo "PASS: flat layout produces root-level files without launcher"
 
 echo ""
 echo "=== Test 4: native task success ==="

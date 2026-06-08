@@ -5,8 +5,8 @@ local graph_mod = require("ballad.graph")
 local plugin_host = require("ballad.plugin_host")
 
 ---@class NodeHandle
----@field _id string
----@field _graph Graph
+---@field _id? string
+---@field _graph? Graph
 ---@field [string] any eagerly-read metadata from _prepare hooks
 local NodeHandle = {}
 NodeHandle.__index = NodeHandle
@@ -31,16 +31,17 @@ function NodeHandle:metadata()
 end
 
 ---@class PluginProxy
----@field _name string
----@field _graph Graph
----@field _host Host
----@field _ctx PipelineContext
+---@field _name? string
+---@field _graph? Graph
+---@field _host? Host
+---@field _ctx? PipelineContext
+---@field [string] fun(...): NodeHandle
 local PluginProxy = {}
 PluginProxy.__index = PluginProxy
 
-function PluginProxy.new(name, graph, host, pipeline_ctx)
+function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
   local self = setmetatable({ _name = name, _graph = graph, _host = host, _ctx = pipeline_ctx }, PluginProxy)
-  local contract = host:contract(name)
+  contract = contract or host:contract(name)
   if not contract then
     error("Plugin '" .. name .. "' has no contract")
   end
@@ -91,6 +92,31 @@ end
 local PipelineContext = {}
 PipelineContext.__index = PipelineContext
 
+local function native_assets_from_cache(graph, entry)
+  local assets = graph_mod.AssetSet.new()
+  for _, asset_info in ipairs(entry.assets or {}) do
+    assets:add(graph:add_asset({
+      kind = asset_info.kind,
+      source_path = asset_info.source_path,
+      virtual_path = asset_info.virtual_path,
+      output_path = asset_info.output_path,
+      content = asset_info.content,
+      generated = asset_info.generated,
+      metadata = asset_info.metadata,
+    }))
+  end
+  return assets
+end
+
+local function path_lists_overlap(left, right)
+  for _, a in ipairs(left or {}) do
+    for _, b in ipairs(right or {}) do
+      if a == b then return true end
+    end
+  end
+  return false
+end
+
 function PipelineContext.new(graph, host, jobs)
   return setmetatable({
     _graph = graph,
@@ -105,13 +131,18 @@ function PipelineContext.new(graph, host, jobs)
   }, PipelineContext)
 end
 
-function PipelineContext:use(plugin_name)
+---@param plugin_ref string|PluginContract
+---@return PluginProxy
+function PipelineContext:use(plugin_ref)
+  local plugin_name, contract = self._host:resolve(plugin_ref)
   if not self._plugins[plugin_name] then
-    self._plugins[plugin_name] = PluginProxy.new(plugin_name, self._graph, self._host, self)
+    self._plugins[plugin_name] = PluginProxy.new(plugin_name, self._graph, self._host, self, contract)
   end
   return self._plugins[plugin_name]
 end
 
+---@param pattern_or_patterns string|string[]
+---@return AssetSet
 function PipelineContext:files(pattern_or_patterns)
   local patterns = type(pattern_or_patterns) == "table" and pattern_or_patterns or { pattern_or_patterns }
   local fs = require("ballad.fs")
@@ -131,6 +162,9 @@ function PipelineContext:files(pattern_or_patterns)
   return assets
 end
 
+---@param path string
+---@param opts? table
+---@return Asset
 function PipelineContext:asset(path, opts)
   opts = opts or {}
   return self._graph:add_asset({
@@ -142,6 +176,10 @@ function PipelineContext:asset(path, opts)
   })
 end
 
+---@param path string
+---@param content string
+---@param opts? table
+---@return Asset
 function PipelineContext:generated(path, content, opts)
   opts = opts or {}
   return self._graph:add_asset({
@@ -171,16 +209,21 @@ function PipelineContext:node(plugin, method, inputs, opts)
   return NodeHandle.new(node.id, self._graph)
 end
 
+---@param key string
+---@param value any
 function PipelineContext:metadata(key, value)
   self._metadata[key] = value
   self._graph.metadata[key] = value
 end
 
+---@param message string
 function PipelineContext:warn(message)
   table.insert(self._warnings, message)
   print("Warning: " .. message)
 end
 
+---@param message string
+---@return never
 function PipelineContext:fail(message)
   error("Pipeline failed: " .. message)
 end
@@ -213,6 +256,8 @@ end
 
 ---@param opts table
 ---@return AssetSet
+---@param opts table
+---@return AssetSet
 function PipelineContext:native_task(opts)
   opts = opts or {}
   local tool = opts.tool or error("native_task: missing required field 'tool'")
@@ -225,9 +270,20 @@ function PipelineContext:native_task(opts)
   local parallel_safe = opts.parallel_safe ~= false
   local description = opts.description or (tool .. " " .. table.concat(args, " "))
 
+  local cache = require("ballad.cache")
+  local cache_key = nil
+  if cacheable then
+    cache_key = cache.compute_native_key(opts, self._metadata._current_plugin, self._metadata._current_method)
+    local entry = cache.read(cache_key)
+    if entry and cache.outputs_valid(entry) then
+      print("Cache hit: native task (" .. description .. ")")
+      return native_assets_from_cache(self._graph, entry)
+    end
+  end
+
   -- Deferred parallel execution
   if self._jobs > 1 and parallel_safe then
-    return self:_native_task_deferred(opts)
+    return self:_native_task_deferred(opts, cache_key)
   end
 
   -- Resolve tool
@@ -407,10 +463,14 @@ function PipelineContext:native_task(opts)
     assets:add(asset)
   end
 
+  if cacheable and cache_key then
+    cache.store(cache_key, assets, outputs)
+  end
+
   return assets
 end
 
-function PipelineContext:_native_task_deferred(opts)
+function PipelineContext:_native_task_deferred(opts, cache_key)
   local native_runner = require("ballad.native_runner")
   local path = require("ballad.path")
   local fs = require("ballad.fs")
@@ -418,6 +478,15 @@ function PipelineContext:_native_task_deferred(opts)
 
   local tool = opts.tool
   local outputs = opts.outputs
+  local inputs = opts.inputs or {}
+
+  for _, pending in ipairs(self._pending_tasks) do
+    local pending_outputs = pending.opts.outputs or {}
+    if path_lists_overlap(outputs, pending_outputs) or path_lists_overlap(inputs, pending_outputs) or path_lists_overlap(pending.opts.inputs or {}, outputs) then
+      self:_flush_pending_tasks()
+      break
+    end
+  end
 
   -- Validate tool exists before deferring
   local resolved_tool = native_runner.find_tool(tool)
@@ -433,6 +502,17 @@ function PipelineContext:_native_task_deferred(opts)
   local stderr_file = os.tmpname()
   local exit_file = os.tmpname()
 
+  local cwd = opts.cwd or "."
+  if not fs.is_dir(cwd) then
+    error("Native task failed: cwd does not exist: " .. cwd)
+  end
+  for _, out in ipairs(outputs) do
+    local parent = path.dirname(out)
+    if parent ~= "." and parent ~= "" then
+      fs.mkdir(parent)
+    end
+  end
+
   -- Record pending task in graph
   local task = {
     kind = "native",
@@ -441,7 +521,7 @@ function PipelineContext:_native_task_deferred(opts)
     tool = tool,
     resolved_tool = resolved_tool,
     args = opts.args,
-    cwd = opts.cwd or ".",
+    cwd = cwd,
     env = opts.env or {},
     inputs = opts.inputs or {},
     outputs = outputs,
@@ -472,18 +552,6 @@ function PipelineContext:_native_task_deferred(opts)
     f:close()
   end
 
-  -- Spawn background process
-  native_runner.spawn_background(opts, stdout_file, stderr_file, exit_file)
-
-  table.insert(self._pending_tasks, {
-    opts = opts,
-    task_id = task_id,
-    stdout_file = stdout_file,
-    stderr_file = stderr_file,
-    exit_file = exit_file,
-  })
-
-  -- Return placeholder AssetSet
   local assets = graph_mod.AssetSet.new()
   for _, out in ipairs(outputs) do
     local asset = self._graph:add_asset({
@@ -500,6 +568,22 @@ function PipelineContext:_native_task_deferred(opts)
     })
     assets:add(asset)
   end
+
+  local spawned, spawn_err = native_runner.spawn_background(opts, stdout_file, stderr_file, exit_file)
+  if not spawned then
+    error("Native task failed to start: " .. tostring(spawn_err))
+  end
+
+  table.insert(self._pending_tasks, {
+    opts = opts,
+    task_id = task_id,
+    stdout_file = stdout_file,
+    stderr_file = stderr_file,
+    exit_file = exit_file,
+    assets = assets,
+    cache_key = cache_key,
+  })
+
   return assets
 end
 
@@ -510,6 +594,7 @@ function PipelineContext:_flush_pending_tasks()
   local path = require("ballad.path")
   local fs = require("ballad.fs")
   local dkjson = require("dkjson")
+  local cache = require("ballad.cache")
   local run_id = self._run_id or os.date("%Y%m%d-%H%M%S")
   local events_file = ".ballad/runs/" .. run_id .. "/events.ndjson"
 
@@ -560,13 +645,11 @@ function PipelineContext:_flush_pending_tasks()
           f:close()
         end
 
-        -- Clean up temp files
-        os.remove(task.stdout_file)
-        os.remove(task.stderr_file)
-        os.remove(task.exit_file)
-
         -- Fail if needed
         if result.exit_code ~= 0 then
+          os.remove(task.stdout_file)
+          os.remove(task.stderr_file)
+          os.remove(task.exit_file)
           error(
             "Native task failed: " .. (task.opts.id or task.opts.description or "native task") .. "\n\n" ..
             "Tool:\n  " .. task.opts.tool .. "\n\n" ..
@@ -574,6 +657,38 @@ function PipelineContext:_flush_pending_tasks()
             (result.stderr ~= "" and ("Stderr:\n  " .. result.stderr .. "\n\n") or "")
           )
         end
+
+        local missing_outputs = {}
+        for _, out in ipairs(task.opts.outputs or {}) do
+          if not fs.read_file(out) and not fs.is_dir(out) then
+            table.insert(missing_outputs, out)
+          end
+        end
+        if #missing_outputs > 0 then
+          os.remove(task.stdout_file)
+          os.remove(task.stderr_file)
+          os.remove(task.exit_file)
+          error(
+            "Native task completed but did not produce declared output:\n\n" ..
+            "Task:\n  " .. (task.opts.id or task.opts.description or "native task") .. "\n\n" ..
+            "Missing outputs:\n  " .. table.concat(missing_outputs, "\n  ")
+          )
+        end
+
+        if task.cache_key and task.assets then
+          cache.store(task.cache_key, task.assets, task.opts.outputs or {})
+        end
+
+        if task.assets then
+          for _, asset in ipairs(task.assets.assets or {}) do
+            if asset.metadata then asset.metadata.pending = nil end
+          end
+        end
+
+        -- Clean up temp files
+        os.remove(task.stdout_file)
+        os.remove(task.stderr_file)
+        os.remove(task.exit_file)
 
         table.remove(pending, i)
       end
@@ -725,7 +840,16 @@ function Pipeline:execute()
 
     self._graph:set_node_result(node_id, result)
 
-    -- Store cache entry on success
+    if result and result.assets then
+      for _, asset in ipairs(result.assets) do
+        if asset.metadata and asset.metadata.pending then
+          self._context:_flush_pending_tasks()
+          break
+        end
+      end
+    end
+
+	    -- Store cache entry on success
     if node.cacheable then
       local outputs = {}
       if result and result.assets then
