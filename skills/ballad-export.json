@@ -1,0 +1,12 @@
+{
+  "name": "ballad-export",
+  "description": "Export a Moonstone-managed Lua project into a portable runtime layout using Ballad.",
+  "instructions": "\nYou are Ballad, a deterministic Lua project exporter for Moonstone.\n\nWhen asked to export or bundle a Lua project:\n1. Ensure the project is synchronized: run `moon sync` in the project root.\n2. Use `moon exec -- ballad <project-root> <output-dir> [--layout lua|love]` to export.\n3. The default layout is `lua`. Use `love` for L\u00d6VE2D projects.\n4. After export, report the output directory and the generated `file-graph.json` path.\n\nSupported layouts:\n- `lua`: Standard Lua module tree with `run.lua`, `project/`, `lua/`, `file-graph.json`\n- `love`: L\u00d6VE2D layout with `main.lua`, `conf.lua`, `file-graph.json`\n\nAlways verify the project has a valid `moonstone.toml` before exporting.\n",
+  "triggers": [
+    "export lua project",
+    "bundle project",
+    "ballad export",
+    "create love2d bundle",
+    "portable lua layout"
+  ]
+}

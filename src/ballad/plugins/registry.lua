@@ -179,6 +179,12 @@ registry.methods = {
 		cacheable = false,
 		parallel_safe = true,
 	},
+	runtime = {
+		inputs = {},
+		outputs = { "asset_set" },
+		cacheable = false,
+		parallel_safe = true,
+	},
 }
 
 registry.package = function(ctx, inputs, opts)
@@ -364,4 +370,144 @@ registry.package = function(ctx, inputs, opts)
 	}))
 	return assets
 end
+
+local function infer_runtime_lua_abi(name, version, explicit)
+	if explicit and explicit ~= "" then return explicit end
+	if name == "luajit" or name == "love" then return "lua51" end
+	local major, minor = tostring(version):match("^(%d+)%.(%d+)")
+	if major and minor then return "lua" .. major .. minor end
+	return "lua54"
+end
+
+local function runtime_bin_provides(name, opts)
+	if opts.bins then return opts.bins end
+	if name == "love" then return { love = "bin/love" } end
+	if name == "luajit" then return { lua = "bin/luajit", luajit = "bin/luajit" } end
+	return { lua = "bin/lua", luac = "bin/luac" }
+end
+
+local function artifact_target_from_path(artifact, name, version)
+	local prefix = name .. "-" .. version .. "-"
+	local base = artifact:match("([^/]+)$") or artifact
+	if base:sub(1, #prefix) ~= prefix or not base:match("%.tar%.zst$") then return nil end
+	return base:sub(#prefix + 1, #base - #".tar.zst")
+end
+
+registry.runtime = function(ctx, inputs, opts)
+	local name = opts.name or os.getenv("RUNTIME_NAME") or "lua"
+	local version = opts.version or os.getenv("RUNTIME_VERSION")
+	if not version or version == "" then ctx.fail("registry.runtime requires opts.version or RUNTIME_VERSION") end
+	local artifacts_dir = opts.artifacts_dir or os.getenv("RUNTIME_ARTIFACTS_DIR") or "scripts/runtime/artifacts"
+	local out_dir = opts.out or os.getenv("RUNTIME_REGISTRY_OUT") or artifacts_dir
+	local registry_url = opts.registry_url or os.getenv("MOONSTONE_PUBLISH_URL") or "https://moonstone.sh/api/registry/v0/publish"
+	local token = opts.token or os.getenv("MOONSTONE_PUBLISH_TOKEN") or os.getenv("MOONSTONE_TOKEN") or ""
+	local publish_now = opts.publish == true or opts.publish == "true" or os.getenv("RUNTIME_PUBLISH") == "1"
+	local lua_abi = infer_runtime_lua_abi(name, version, opts.lua_abi or os.getenv("RUNTIME_LUA_ABI"))
+	local lua_api = opts.lua_api or os.getenv("RUNTIME_LUA_API") or lua_abi
+	local bins = runtime_bin_provides(name, opts)
+
+	fs.mkdir(out_dir)
+	local descriptor_path = path.join(out_dir, name .. "-" .. version .. "-package.toml")
+	local publish_path = path.join(out_dir, "publish-" .. name .. "-" .. version .. ".sh")
+	local artifact_paths = {}
+	local package_lines = {
+		"[package]",
+		'name = "' .. name .. '"',
+		'version = "' .. version .. '"',
+		'kind = "runtime"',
+		'description = "' .. (opts.description or (name .. " runtime packaged for Moonstone")) .. '"',
+		"",
+	}
+
+	local find_cmd = "find " .. process.quote(artifacts_dir) .. " -maxdepth 1 -type f -name " .. process.quote(name .. "-" .. version .. "-*.tar.zst") .. " | sort"
+	local pipe = assert(io.popen(find_cmd, "r"))
+	for artifact in pipe:lines() do
+		local target = artifact_target_from_path(artifact, name, version)
+		if target then
+			local blob_hash = fs.read_file(artifact .. ".blob.hash")
+			if blob_hash then blob_hash = blob_hash:match("^%s*(.-)%s*$") end
+			if not blob_hash or blob_hash == "" then blob_hash = "b3:" .. process.b3sum(artifact) end
+			local recipe_hash = "b3:" .. process.b3sum_string("recipe-" .. name .. "-" .. version .. "-" .. target)
+			local handle = io.open(artifact, "rb")
+			local bytes = 0
+			if handle then bytes = handle:seek("end") or 0; handle:close() end
+			table.insert(artifact_paths, artifact)
+			table.insert(package_lines, "[[artifacts]]")
+			table.insert(package_lines, 'kind = "runtime"')
+			table.insert(package_lines, 'target = "' .. target .. '"')
+			table.insert(package_lines, 'lua_api = "' .. lua_api .. '"')
+			table.insert(package_lines, 'lua_abi = "' .. lua_abi .. '"')
+			table.insert(package_lines, 'format = "tar.zst"')
+			table.insert(package_lines, 'url = "https://moonstone.sh/registry/v0/blobs/placeholder/' .. blob_hash .. '"')
+			table.insert(package_lines, 'hash = "' .. blob_hash .. '"')
+			table.insert(package_lines, 'bytes = ' .. tostring(bytes))
+			table.insert(package_lines, 'recipe_hash = "' .. recipe_hash .. '"')
+			table.insert(package_lines, "")
+			table.insert(package_lines, "[artifacts.materialize]")
+			table.insert(package_lines, 'type = "archive"')
+			table.insert(package_lines, "")
+			table.insert(package_lines, "[[artifacts.provides]]")
+			table.insert(package_lines, 'kind = "runtime"')
+			table.insert(package_lines, 'name = "' .. name .. '"')
+			table.insert(package_lines, 'version = "' .. version .. '"')
+			table.insert(package_lines, 'lua_abi = "' .. lua_abi .. '"')
+			table.insert(package_lines, "")
+			for bin_name, bin_path in pairs(bins) do
+				table.insert(package_lines, "[[artifacts.provides]]")
+				table.insert(package_lines, 'kind = "bin"')
+				table.insert(package_lines, 'name = "' .. bin_name .. '"')
+				table.insert(package_lines, 'path = "' .. bin_path .. '"')
+				table.insert(package_lines, "")
+			end
+		end
+	end
+	pipe:close()
+
+	if #artifact_paths == 0 then
+		ctx.fail("registry.runtime found no artifacts in " .. artifacts_dir .. " for " .. name .. " " .. version)
+	end
+
+	fs.write_file(descriptor_path, table.concat(package_lines, "\n") .. "\n")
+	local publish_lines = {
+		"#!/usr/bin/env sh",
+		"set -eu",
+		': "${MOONSTONE_TOKEN:=${MOONSTONE_PUBLISH_TOKEN:-}}"',
+		': "${MOONSTONE_TOKEN:?Set MOONSTONE_TOKEN or MOONSTONE_PUBLISH_TOKEN}"',
+		"curl --fail-with-body -H \"Authorization: Bearer $MOONSTONE_TOKEN\" -F descriptor=@\"" .. descriptor_path .. "\" \\",
+	}
+	for _, artifact in ipairs(artifact_paths) do
+		table.insert(publish_lines, "  -F blob=@\"" .. artifact .. "\" \\")
+	end
+	table.insert(publish_lines, '  "${MOONSTONE_PUBLISH_URL:-' .. registry_url .. '}"')
+	fs.write_file(publish_path, table.concat(publish_lines, "\n") .. "\n")
+	fs.chmod(publish_path, "+x")
+
+	if publish_now then
+		if token == "" then ctx.fail("registry.runtime publish requires MOONSTONE_PUBLISH_TOKEN or MOONSTONE_TOKEN") end
+		local curl_cmd = "curl --fail-with-body -H " .. process.quote("Authorization: Bearer " .. token) .. " -F descriptor=@" .. process.quote(descriptor_path)
+		for _, artifact in ipairs(artifact_paths) do
+			curl_cmd = curl_cmd .. " -F blob=@" .. process.quote(artifact)
+		end
+		curl_cmd = curl_cmd .. " " .. process.quote(registry_url)
+		if not process.command_ok(curl_cmd) then ctx.fail("registry.runtime publish failed") end
+	end
+
+	print("Runtime registry descriptor ready: " .. descriptor_path)
+	local assets = graph.AssetSet.new()
+	assets:add(ctx.graph:add_asset({
+		kind = "registry",
+		virtual_path = descriptor_path,
+		output_path = descriptor_path,
+		metadata = {
+			kind = "runtime",
+			name = name,
+			version = version,
+			artifacts = artifact_paths,
+			package_toml = descriptor_path,
+			publish_sh = publish_path,
+		},
+	}))
+	return assets
+end
+
 return registry

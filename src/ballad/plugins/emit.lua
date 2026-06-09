@@ -36,7 +36,7 @@ return {
 
     fs.mkdir(dest)
     if opts.clean ~= false then
-      local preserve = path.join(dest, "ballad/registry-artifact")
+      local preserve = path.join(dest, "registry-artifact")
       process.command_ok(
         "find " .. process.quote(dest) .. " -mindepth 1 -path " .. process.quote(preserve) .. " -prune -o -exec rm -rf {} +"
       )

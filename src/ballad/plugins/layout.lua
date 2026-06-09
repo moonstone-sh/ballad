@@ -147,8 +147,11 @@ return {
         libexec_root = libexec_root,
         bin_name = bin_name,
         entry = entry,
+        dependencies = meta.dependencies,
       },
     }))
+    -- Preserve the original project asset so downstream nodes can access project metadata
+    assets:add(inputs[1].assets[1])
     return assets
   end,
 

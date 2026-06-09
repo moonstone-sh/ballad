@@ -1,0 +1,43 @@
+{
+  "name": "ballad",
+  "version": "0.1.15",
+  "description": "Deterministic Lua project exporter and bundler for Moonstone",
+  "author": {
+    "name": "Moonstone",
+    "email": "hello@moonstone.sh",
+    "url": "https://moonstone.sh"
+  },
+  "homepage": "https://moonstone.sh/docs/ballad",
+  "repository": "https://github.com/moonstone/ballad",
+  "license": "MIT",
+  "keywords": [
+    "moonstone",
+    "lua",
+    "export",
+    "bundle",
+    "love2d"
+  ],
+  "skills": "./skills/",
+  "scripts": "./scripts/",
+  "interface": {
+    "displayName": "Ballad",
+    "shortDescription": "Export Moonstone Lua projects to portable runtime layouts",
+    "longDescription": "Ballad reads a synchronized Moonstone project, collects project Lua files and selected Lua package modules, and emits a deterministic output tree plus file-graph.json. Supports lua and love layouts.",
+    "developerName": "Moonstone",
+    "category": "Developer Tool",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://moonstone.sh",
+    "privacyPolicyURL": "https://moonstone.sh/privacy",
+    "termsOfServiceURL": "https://moonstone.sh/terms",
+    "defaultPrompt": [
+      "Export this Moonstone project to a portable Lua layout.",
+      "Bundle this project for L\u00d6VE2D distribution."
+    ],
+    "brandColor": "#6366F1",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
+  }
+}
