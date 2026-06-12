@@ -1,5 +1,6 @@
 local graph = require("ballad.graph")
 local project_mod = require("ballad.project")
+local moonstone_input = require("ballad.plugins.input.moonstone")
 
 return {
   name = "ballad.plugins.moonstone",
@@ -32,6 +33,10 @@ return {
     local runtime_version = rt.version or env_rt.version or "5.1"
     local runtime = runtime_name .. "@" .. runtime_version
     local lua_abi = rt.abi or env_rt.abi or "5.1"
+    local packages = moonstone_input.enrich_packages(loaded.packages, {
+      roles = opts.roles or { "runtime" },
+      moon = opts.moon or opts.moon_bin or "moon",
+    })
     return {
       name = name,
       version = version,
@@ -39,6 +44,7 @@ return {
       runtime = runtime,
       lua_abi = lua_abi,
       registry_name = pkg.registry_name or nil,
+      packages = packages,
     }
   end,
 
@@ -85,13 +91,17 @@ return {
     end
 
     local assets = graph.AssetSet.new()
+    local packages = moonstone_input.enrich_packages(loaded.packages, {
+      roles = opts.roles or { "runtime" },
+      moon = opts.moon or opts.moon_bin or "moon",
+    })
     local asset = ctx.graph:add_asset({
       kind = "project",
       source_path = root,
       metadata = {
         root = loaded.root,
         manifest = loaded.manifest,
-        packages = loaded.packages,
+        packages = packages,
         env = loaded.env,
         abi = loaded.env and loaded.env.runtime and loaded.env.runtime.abi or "5.1",
         dependencies = dep_roles,

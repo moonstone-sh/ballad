@@ -1,6 +1,6 @@
 # Ballad Architecture
 
-Ballad is split around a small v0.1 exporter pipeline.
+Ballad has a legacy exporter plus the vNext partiture pipeline. The vNext model is a DAG of first-class sources, transform plugins, and explicit sinks.
 
 ```text
 src/main.lua
@@ -18,14 +18,25 @@ Argument parsing and help output.
 
 ### `ballad.exporter`
 
-The actual export orchestration:
+Legacy export orchestration:
 
 1. load Moonstone project metadata
 2. reset the output directory
 3. copy project Lua files
 4. copy selected package Lua modules from `.moonstone/env`
-5. emit `file-graph.json`
-6. emit `run.lua` for the plain Lua layout
+5. write `file-graph.json`
+6. write `run.lua` for the plain Lua layout
+
+### `ballad.pipeline`
+
+Partiture graph orchestration:
+
+1. construct source, transform, and sink nodes
+2. validate that at least one explicit `p.sink.*` node exists
+3. reject dangling transform leaves
+4. plan the sink-reachable graph and progress weights
+5. execute the planned graph and write debug metadata
+6. materialize terminal outputs through core sink handlers
 
 ### `ballad.project`
 
@@ -51,12 +62,10 @@ Minimal lockfile parsing and artifact source matching.
 
 Minimal TOML parser for the subset Ballad currently needs.
 
-## Future plugin seam
+## Plugin seam
 
-The current exporter has a single central `add_file` point. This is the natural seam for v0.2 plugin hooks:
+Plugins provide transforms only. Ballad core owns run boundaries and terminal materialization:
 
 ```text
-discover -> load -> transform -> emit -> finalize
+source -> transform -> sink
 ```
-
-For v0.1, keeping the exporter boring is intentional.

@@ -39,14 +39,13 @@ return ballad.partiture(function(p)
   local moonstone = p:use(ballad.plugins.moonstone)
   local layout = p:use(ballad.plugins.layout)
   local registry = p:use(ballad.plugins.registry)
-  local emit = p:use(ballad.plugins.emit)
 
   local project = moonstone.project({ root = "." })
   local app = layout.flat(project, {
     name = "ballad",
     entry = "src/main.lua",
   })
-  registry.package(app, {
+  local registry_artifact = registry.package(app, {
     name = project.registry_name or "moonstone/ballad",
     version = project.version,
     target = "any",
@@ -54,9 +53,12 @@ return ballad.partiture(function(p)
     lua_abi = project.lua_abi or "5.1",
     description = project.description,
   })
-  emit.directory(app, {
+  p.sink.directory(app, {
     out = "dist/flat-root",
     file_graph = true,
+  })
+  p.sink.artifact(registry_artifact, {
+    out = "dist/flat-root/registry-artifact",
   })
 end)
 LUAEOF
@@ -80,6 +82,9 @@ return ballad.partiture(function(p)
     args = { "-c", "echo hello > native-output.txt" },
     outputs = { "native-output.txt" },
     description = "Test native task success",
+  })
+  p.sink.file_graph(p.source.files({ "native-output.txt" }), {
+    out = "/tmp/native-success-file-graph.json",
   })
 end)
 LUAEOF
@@ -230,6 +235,9 @@ return ballad.partiture(function(p)
     outputs = { "/tmp/parallel_b.txt" },
     parallel_safe = true,
     description = "Parallel task B",
+  })
+  p.sink.file_graph(p.source.files({ "parallel_a.txt", "parallel_b.txt" }, { root = "/tmp" }), {
+    out = "/tmp/parallel-file-graph.json",
   })
 end)
 LUAEOF

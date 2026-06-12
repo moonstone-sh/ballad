@@ -1,53 +1,87 @@
 # Ballad
 
-Ballad exports Moonstone-managed Lua projects into plain runtime layouts.
-
-This is the early `v0.1.0` file-graph exporter. It reads a synchronized Moonstone project, collects project Lua files and selected Lua package modules from `.moonstone/env`, and emits a deterministic output tree plus `file-graph.json`.
+Ballad exports Moonstone-managed Lua projects through a deterministic pipeline. A partiture declares explicit sources, plugin transforms, and sinks; Ballad core owns planning, execution, file materialization, file graphs, and artifacts.
 
 ## Usage
+
+Legacy export remains available:
 
 ```sh
 moon sync
 moon run export -- . dist/ballad
 ```
 
-For a LÖVE-style output layout:
+The vNext pipeline runs a partiture:
 
 ```sh
-moon run export -- . dist/love --love
+moon exec ballad -- play partiture.lua
 ```
 
-or:
+## Partiture API
 
-```sh
-moon run export -- . dist/love --layout love
+Plugins provide transforms only. Use `p.sink.*` for terminal outputs; every partiture must declare at least one explicit sink.
+
+```lua
+local ballad = require("ballad")
+
+return ballad.partiture(function(p)
+  local moonstone = p:use(ballad.plugins.moonstone)
+  local layout = p:use(ballad.plugins.layout)
+  local registry = p:use(ballad.plugins.registry)
+
+  local project = moonstone.project({ root = "." })
+  local app = layout.libexec(project, {
+    name = "ballad",
+    entry = "src/main.lua",
+    bin = "ballad",
+    interpreter = "luajit",
+  })
+
+  local artifact = registry.package(app, {
+    name = project.registry_name or "moonstone/ballad",
+    version = project.version,
+    target = "any",
+    runtime = project.runtime,
+    lua_abi = project.lua_abi,
+  })
+
+  p.sink.directory(app, { out = "dist/ballad", file_graph = true })
+  p.sink.artifact(artifact, { out = "dist/ballad/registry-artifact" })
+end)
 ```
 
-## Layouts
+Core namespaces:
 
-### `lua`
+- `p.source.directory(path, opts)` introduces files from a directory.
+- `p.source.files(patterns, opts)` introduces files matching glob-style patterns.
+- `p.source.stdin(opts)` introduces stdin as a generated asset.
+- `p.sink.directory(input, opts)` writes an asset set to a directory.
+- `p.sink.stdout(input, opts)` prints graph data to stdout.
+- `p.sink.file_graph(input, opts)` writes file graph JSON.
+- `p.sink.artifact(input, opts)` writes a single artifact output.
 
-```text
-dist/ballad/
-  run.lua
-  project/
-    src/...
-  lua/
-    dependency.lua
-  file-graph.json
+## LÖVE Example
+
+```lua
+local ballad = require("ballad")
+
+return ballad.partiture(function(p)
+  local moonstone = p:use(ballad.plugins.moonstone)
+  local love = p:use(ballad.plugins.love)
+
+  local project = moonstone.project({ root = "." })
+  local app = love.layout(project, {
+    main = "main.lua",
+    conf = "conf.lua",
+    include = { "main.lua", "conf.lua", "src/**", "assets/**" },
+  })
+
+  p.sink.directory(app, { out = "dist/love-root", file_graph = true })
+  p.sink.artifact(love.pack(app, { name = project.name }), {
+    out = "dist/" .. project.name .. ".love",
+  })
+end)
 ```
-
-### `love`
-
-```text
-dist/love/
-  main.lua
-  conf.lua
-  dependency.lua
-  file-graph.json
-```
-
-The `love` layout preserves project-relative paths and dependency module paths at the output root.
 
 ## Moonstone Registry Package
 
@@ -57,23 +91,4 @@ Build an upload-ready production bundle for `@moonstone/ballad`:
 
 ```sh
 ./release-tools/build-registry-artifact.py
-```
-
-Build a staging bundle for the test namespace:
-
-```sh
-BALLAD_PACKAGE_NAME=@kirin/ballad ./release-tools/build-registry-artifact.py
-```
-
-The generated `dist/registry/ballad-0.1.0/` directory contains `package.toml`, the deterministic artifact blob, checksums, and `publish.sh`. Upload it with:
-
-```sh
-MOONSTONE_TOKEN=... dist/registry/ballad-0.1.0/publish.sh
-```
-
-Consumers install the command as a binary dependency:
-
-```sh
-moon add --bin @moonstone/ballad
-moon exec -- ballad . dist/ballad
 ```

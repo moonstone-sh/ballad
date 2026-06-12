@@ -62,9 +62,6 @@ return {
     end
     local meta = project_asset.metadata
     local should_export = export_filter(meta)
-    local out_dir = opts.out or "dist/ballad"
-    fs.remove_tree(out_dir)
-    fs.mkdir(out_dir)
     local libexec_root = "libexec/" .. (opts.name or "app")
     local bin_name = opts.bin or opts.name or "app"
     local entry = opts.entry or "src/main.lua"
@@ -76,12 +73,6 @@ return {
         error("destination collision: " .. task.dest)
       end
       destinations[task.dest] = task.src or "generated"
-      if task.kind == "generated" then
-        fs.mkdir(path.dirname(path.join(out_dir, task.dest)))
-        fs.write_file(path.join(out_dir, task.dest), task.content)
-      else
-        fs.copy_file(task.src, path.join(out_dir, task.dest))
-      end
       table.insert(files, task)
     end
     for _, source in ipairs(fs.list_files(meta.root)) do
@@ -124,24 +115,24 @@ return {
       'exec ' .. interpreter .. ' "$LIBEXEC/' .. entry .. '" "$@"',
     }
     local launcher = table.concat(launcher_parts, "\n") .. "\n"
-    add_file({ dest = "bin/" .. bin_name, content = launcher, kind = "generated" })
-    fs.chmod(path.join(out_dir, "bin/" .. bin_name), "+x")
+    add_file({ dest = "bin/" .. bin_name, content = launcher, kind = "generated", executable = true })
     local assets = graph.AssetSet.new()
     for _, task in ipairs(files) do
       local asset = ctx.graph:add_asset({
         kind = task.kind,
         source_path = task.src,
         virtual_path = task.dest,
-        output_path = path.join(out_dir, task.dest),
         content = task.content,
         generated = task.kind == "generated",
+        metadata = {
+          executable = task.executable == true,
+        },
       })
       assets:add(asset)
     end
     assets:add(ctx.graph:add_asset({
       kind = "files",
-      virtual_path = out_dir,
-      output_path = out_dir,
+      virtual_path = "libexec-root",
       metadata = {
         layout = "libexec",
         libexec_root = libexec_root,

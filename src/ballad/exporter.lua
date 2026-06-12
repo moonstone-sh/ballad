@@ -115,6 +115,13 @@ end
 
 local function is_runtime_package(package)
 	if not package then return true end
+	if package.roles then
+		if #package.roles == 0 then return true end
+		for _, role in ipairs(package.roles) do
+			if role == "runtime" then return true end
+		end
+		return false
+	end
 	if not package.groups then return true end
 	if #package.groups == 0 then return true end
 	for _, g in ipairs(package.groups) do

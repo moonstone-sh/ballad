@@ -61,10 +61,15 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
       local node = graph:add_node({
         plugin = name,
         method = method_name,
+        role = method_contract.role or "transform",
+        label = method_contract.label,
         inputs = inputs,
         options = options,
+        effects = method_contract.effects or {},
+        progress_weight = method_contract.progress_weight,
         cacheable = method_contract.cacheable,
         parallel_safe = method_contract.parallel_safe,
+        enabled = options.enabled,
       })
       local extra_meta = nil
       local prepare_fn = contract[method_name .. "_prepare"]
@@ -118,7 +123,7 @@ local function path_lists_overlap(left, right)
 end
 
 function PipelineContext.new(graph, host, jobs)
-  return setmetatable({
+  local self = setmetatable({
     _graph = graph,
     _host = host,
     _plugins = {},
@@ -129,11 +134,71 @@ function PipelineContext.new(graph, host, jobs)
     _jobs = jobs or 1,
     _pending_tasks = {},
   }, PipelineContext)
+  self.source = {}
+  self.sink = {}
+  self.source.directory = function(dir_path, opts)
+    return self:_core_node("ballad.core.source", "directory", {}, opts or { path = dir_path }, function(o) o.path = o.path or dir_path end)
+  end
+  self.source.files = function(patterns, opts)
+    opts = opts or {}
+    opts.patterns = patterns
+    return self:_core_node("ballad.core.source", "files", {}, opts)
+  end
+  self.source.stdin = function(opts)
+    return self:_core_node("ballad.core.source", "stdin", {}, opts or {})
+  end
+  self.sink.directory = function(input, opts)
+    return self:_core_node("ballad.core.sink", "directory", { input }, opts or {})
+  end
+  self.sink.stdout = function(input, opts)
+    return self:_core_node("ballad.core.sink", "stdout", { input }, opts or {})
+  end
+  self.sink.file_graph = function(input, opts)
+    return self:_core_node("ballad.core.sink", "file_graph", { input }, opts or {})
+  end
+  self.sink.artifact = function(input, opts)
+    return self:_core_node("ballad.core.sink", "artifact", { input }, opts or {})
+  end
+  return self
+end
+
+function PipelineContext:_core_node(plugin, method, inputs, opts, mutate_opts)
+  opts = opts or {}
+  if mutate_opts then mutate_opts(opts) end
+  local input_ids = {}
+  for _, inp in ipairs(inputs or {}) do
+    if type(inp) == "table" and getmetatable(inp) == NodeHandle then
+      table.insert(input_ids, inp._id)
+    elseif inp ~= nil then
+      error(method .. " expects pipeline node handles as inputs")
+    end
+  end
+  local role = plugin == "ballad.core.source" and "source" or "sink"
+  local node = self._graph:add_node({
+    plugin = plugin,
+    method = method,
+    role = role,
+    label = opts.label or method,
+    inputs = input_ids,
+    options = opts,
+    effects = role == "sink" and { "write" } or { "read" },
+    progress_weight = opts.progress_weight or 1,
+    cacheable = false,
+    parallel_safe = method ~= "stdout",
+    enabled = opts.enabled,
+  })
+  return NodeHandle.new(node.id, self._graph)
 end
 
 ---@param plugin_ref string|PluginContract
 ---@return PluginProxy
 function PipelineContext:use(plugin_ref)
+  if plugin_ref == "emit" or plugin_ref == "ballad.plugins.emit" then
+    error("emit plugin removed; use p.sink.*")
+  end
+  if type(plugin_ref) == "table" and plugin_ref.name == "ballad.plugins.emit" then
+    error("emit plugin removed; use p.sink.*")
+  end
   local plugin_name, contract = self._host:resolve(plugin_ref)
   if not self._plugins[plugin_name] then
     self._plugins[plugin_name] = PluginProxy.new(plugin_name, self._graph, self._host, self, contract)
@@ -699,6 +764,188 @@ function PipelineContext:_flush_pending_tasks()
   end
 end
 
+local function glob_to_pattern(glob)
+  local pattern = tostring(glob):gsub("([%.%+%-%^%$%(%)%%])", "%%%1")
+  pattern = pattern:gsub("%*%*/", ".-/")
+  pattern = pattern:gsub("%*%*", ".-")
+  pattern = pattern:gsub("%*", "[^/]*")
+  return "^" .. pattern .. "$"
+end
+
+local function glob_match(value, glob)
+  return tostring(value):match(glob_to_pattern(glob)) ~= nil
+end
+
+local function collect_input_assets(input_results)
+  local assets = graph_mod.AssetSet.new()
+  for _, set in ipairs(input_results or {}) do
+    for _, asset in ipairs(set.assets or {}) do
+      local is_project_metadata = asset.kind == "project" and asset.virtual_path == nil
+      if asset.kind ~= "files" and not is_project_metadata then
+        assets:add(asset)
+      end
+    end
+  end
+  return assets
+end
+
+local function write_asset_to_directory(fs, path, asset, out_dir)
+  local rel = asset.virtual_path or asset.output_path or asset.source_path or asset.id
+  rel = rel:gsub("^/", "")
+  local dest = path.join(out_dir, rel)
+  if asset.generated and asset.content then
+    fs.mkdir(path.dirname(dest))
+    fs.write_file(dest, asset.content)
+  elseif asset.source_path then
+    fs.copy_file(asset.source_path, dest)
+  elseif asset.output_path and asset.output_path ~= dest then
+    fs.copy_file(asset.output_path, dest)
+  elseif asset.content then
+    fs.mkdir(path.dirname(dest))
+    fs.write_file(dest, asset.content)
+  end
+  if asset.metadata and asset.metadata.executable then
+    fs.chmod(dest, "+x")
+  end
+  asset.output_path = dest
+end
+
+local function file_graph_for(input_results)
+  local files = {}
+  local layout = nil
+  for _, set in ipairs(input_results or {}) do
+    for _, asset in ipairs(set.assets or {}) do
+      if asset.kind == "files" and asset.metadata then
+        layout = asset.metadata.layout or layout
+      end
+      local is_project_metadata = asset.kind == "project" and asset.virtual_path == nil
+      if asset.kind ~= "files" and not is_project_metadata then
+        table.insert(files, {
+          id = asset.id,
+          kind = asset.kind,
+          source = asset.source_path,
+          dest = asset.virtual_path,
+          virtual_path = asset.virtual_path,
+          output_path = asset.output_path,
+          generated = asset.generated,
+          metadata = asset.metadata,
+        })
+      end
+    end
+  end
+  table.sort(files, function(a, b) return (a.virtual_path or a.id) < (b.virtual_path or b.id) end)
+  return { layout = layout, files = files }
+end
+
+local function core_handler(plugin, method)
+  local fs = require("ballad.fs")
+  local path = require("ballad.path")
+  local process = require("ballad.process")
+  local dkjson = require("dkjson")
+
+  if plugin == "ballad.core.source" then
+    if method == "directory" then
+      return function(ctx, _, opts)
+        local root = opts.path or opts.root or "."
+        local assets = graph_mod.AssetSet.new()
+        for _, source in ipairs(fs.list_files(root)) do
+          assets:add(ctx.graph:add_asset({
+            kind = "file",
+            source_path = source,
+            virtual_path = path.relative(source, root),
+            metadata = opts.metadata,
+          }))
+        end
+        return assets
+      end
+    elseif method == "files" then
+      return function(ctx, _, opts)
+        local patterns = type(opts.patterns) == "table" and opts.patterns or { opts.patterns }
+        local root = opts.root or "."
+        local assets = graph_mod.AssetSet.new()
+        for _, source in ipairs(fs.list_files(root)) do
+          local rel = path.relative(source, root)
+          for _, pattern in ipairs(patterns) do
+            if glob_match(rel, pattern) then
+              assets:add(ctx.graph:add_asset({ kind = "file", source_path = source, virtual_path = rel, metadata = opts.metadata }))
+              break
+            end
+          end
+        end
+        return assets
+      end
+    elseif method == "stdin" then
+      return function(ctx, _, opts)
+        local content = io.read("*a") or ""
+        local assets = graph_mod.AssetSet.new()
+        assets:add(ctx.graph:add_asset({ kind = opts.kind or "generated", virtual_path = opts.name or "stdin", content = content, generated = true, metadata = opts.metadata }))
+        return assets
+      end
+    end
+  elseif plugin == "ballad.core.sink" then
+    if method == "directory" then
+      return function(ctx, input_results, opts)
+        local out_dir = opts.out or opts.path or "dist/ballad"
+        fs.remove_tree(out_dir)
+        fs.mkdir(out_dir)
+        local input_assets = collect_input_assets(input_results)
+        for _, asset in ipairs(input_assets.assets) do
+          write_asset_to_directory(fs, path, asset, out_dir)
+        end
+        if opts.file_graph then
+          fs.write_file(path.join(out_dir, "file-graph.json"), dkjson.encode(file_graph_for(input_results)) .. "\n")
+        end
+        local result = graph_mod.AssetSet.new()
+        result:add(ctx.graph:add_asset({ kind = "sink", virtual_path = out_dir, output_path = out_dir, generated = true, metadata = { kind = "directory", count = input_assets:count() } }))
+        return result
+      end
+    elseif method == "stdout" then
+      return function(ctx, input_results, opts)
+        local payload = opts.file_graph and file_graph_for(input_results) or file_graph_for(input_results).files
+        print(dkjson.encode(payload))
+        local result = graph_mod.AssetSet.new()
+        result:add(ctx.graph:add_asset({ kind = "sink", virtual_path = "stdout", metadata = { kind = "stdout" } }))
+        return result
+      end
+    elseif method == "file_graph" then
+      return function(ctx, input_results, opts)
+        local out = opts.out or opts.path or "file-graph.json"
+        fs.mkdir(path.dirname(out))
+        fs.write_file(out, dkjson.encode(file_graph_for(input_results)) .. "\n")
+        local result = graph_mod.AssetSet.new()
+        result:add(ctx.graph:add_asset({ kind = "sink", virtual_path = out, output_path = out, generated = true, metadata = { kind = "file_graph" } }))
+        return result
+      end
+    elseif method == "artifact" then
+      return function(ctx, input_results, opts)
+        local input_assets = collect_input_assets(input_results)
+        local chosen = nil
+        for _, asset in ipairs(input_assets.assets) do
+          if asset.output_path or asset.source_path then chosen = asset end
+        end
+        if not chosen then ctx.fail("sink.artifact requires an input asset with source_path or output_path") end
+        local source = chosen.output_path or chosen.source_path
+        local out = opts.out or source
+        if out ~= source then
+          if fs.is_dir(source) then
+            fs.remove_tree(out)
+            fs.mkdir(path.dirname(out))
+            if not process.command_ok("cp -R " .. process.quote(source) .. " " .. process.quote(out)) then
+              process.fail("cannot copy artifact " .. source .. " to " .. out)
+            end
+          else
+            fs.copy_file(source, out)
+          end
+        end
+        local result = graph_mod.AssetSet.new()
+        result:add(ctx.graph:add_asset({ kind = "sink", virtual_path = out, output_path = out, generated = true, metadata = { kind = "artifact", source = source } }))
+        return result
+      end
+    end
+  end
+  return nil
+end
+
 ---@class Pipeline
 ---@field _graph Graph
 ---@field _host Host
@@ -724,8 +971,74 @@ function Pipeline:graph()
   return self._graph
 end
 
+function Pipeline:plan(debug_dir)
+  local fs = require("ballad.fs")
+  local path = require("ballad.path")
+  local dkjson = require("dkjson")
+
+  local sinks = self._graph:terminal_sinks()
+  if #sinks == 0 then
+    error("Pipeline requires at least one explicit sink (use p.sink.*)")
+  end
+
+  local has_children = {}
+  for parent_id, children in pairs(self._graph.edges) do
+    for _, child_id in ipairs(children) do
+      local child = self._graph.nodes[child_id]
+      if child and child.enabled ~= false then
+        has_children[parent_id] = true
+      end
+    end
+  end
+  local dangling = {}
+  for id, node in pairs(self._graph.nodes) do
+    if node.enabled ~= false and node.role == "transform" and not has_children[id] then
+      table.insert(dangling, id .. " (" .. node.plugin .. "." .. node.method .. ")")
+    end
+  end
+  table.sort(dangling)
+  if #dangling > 0 then
+    error("Pipeline has dangling transform leaf node(s); connect them to p.sink.* or remove them:\n  " .. table.concat(dangling, "\n  "))
+  end
+
+  local reachable = {}
+  local function visit(id)
+    if reachable[id] then return end
+    local node = self._graph.nodes[id]
+    if not node or node.enabled == false then return end
+    reachable[id] = true
+    for _, input_id in ipairs(node.inputs or {}) do
+      visit(input_id)
+    end
+  end
+  for _, sink in ipairs(sinks) do visit(sink.id) end
+
+  local order = {}
+  for _, id in ipairs(self._graph:topological_order()) do
+    if reachable[id] then table.insert(order, id) end
+  end
+
+  local total_weight = 0
+  for _, id in ipairs(order) do
+    local node = self._graph.nodes[id]
+    total_weight = total_weight + (node.progress_weight or 1)
+  end
+  local plan = { order = order, sinks = {}, total_progress_weight = total_weight, reachable = reachable }
+  for _, sink in ipairs(sinks) do
+    table.insert(plan.sinks, { id = sink.id, method = sink.method, label = sink.label, options = sink.options })
+  end
+  self._graph.metadata.plan = {
+    order = order,
+    sink_count = #sinks,
+    total_progress_weight = total_weight,
+  }
+  if debug_dir then
+    fs.write_file(path.join(debug_dir, "plan.json"), dkjson.encode(plan) .. "\n")
+  end
+  return plan
+end
+
 function Pipeline:execute()
-  local order = self._graph:topological_order()
   local fs = require("ballad.fs")
   local path = require("ballad.path")
   local dkjson = require("dkjson")
@@ -735,6 +1048,8 @@ function Pipeline:execute()
   self._context._run_id = run_id
   local debug_dir = ".ballad/runs/" .. run_id
   fs.mkdir(debug_dir)
+  local plan = self:plan(debug_dir)
+  local order = plan.order
 
   for _, node_id in ipairs(order) do
     local node = self._graph.nodes[node_id]
@@ -812,7 +1127,7 @@ function Pipeline:execute()
       self._context:_flush_pending_tasks()
     end
 
-    local handler = self._host:handler(node.plugin, node.method)
+    local handler = core_handler(node.plugin, node.method) or self._host:handler(node.plugin, node.method)
     if not handler then
       error("No handler for " .. node.plugin .. "." .. node.method)
     end
@@ -884,8 +1199,8 @@ function Pipeline:execute()
   return sink_results
 end
 
-function pipeline.new(host)
-  return Pipeline.new(host)
+function pipeline.new(host, jobs)
+  return Pipeline.new(host, jobs)
 end
 
 return pipeline

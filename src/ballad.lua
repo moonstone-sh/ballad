@@ -6,7 +6,6 @@ require("ballad.types")
 return {
   partiture = partiture.partiture,
   plugins = {
-    emit = require("ballad.plugins.emit"),
     layout = require("ballad.plugins.layout"),
     love = require("ballad.plugins.love"),
     lua = require("ballad.plugins.lua"),
@@ -14,5 +13,8 @@ return {
     nvim = require("ballad.plugins.nvim"),
     registry = require("ballad.plugins.registry"),
     runtime = require("ballad.plugins.runtime"),
+    input = {
+      moonstone = require("ballad.plugins.input.moonstone"),
+    },
   },
 }

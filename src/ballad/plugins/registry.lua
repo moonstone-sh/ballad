@@ -199,7 +199,28 @@ registry.package = function(ctx, inputs, opts)
 		ctx.fail("registry.package requires a layout node as input")
 	end
 	local meta = files_asset.metadata or {}
-	local out_dir = files_asset.output_path or "dist/ballad"
+	local out_dir = files_asset.output_path or path.join(".ballad/tmp/registry-package-" .. tostring(ctx.node.id), "payload")
+	if not files_asset.output_path then
+		fs.remove_tree(path.dirname(out_dir))
+		fs.mkdir(out_dir)
+		for _, asset in ipairs(inputs[1].assets) do
+			local is_project_metadata = asset.kind == "project" and asset.virtual_path == nil
+			if asset.kind ~= "files" and not is_project_metadata then
+				local dest = path.join(out_dir, asset.virtual_path or asset.id)
+				if asset.generated and asset.content then
+					fs.mkdir(path.dirname(dest))
+					fs.write_file(dest, asset.content)
+				elseif asset.source_path then
+					fs.copy_file(asset.source_path, dest)
+				elseif asset.output_path then
+					fs.copy_file(asset.output_path, dest)
+				end
+				if asset.metadata and asset.metadata.executable then
+					fs.chmod(dest, "+x")
+				end
+			end
+		end
+	end
 	local artifact_dir = path.join(out_dir, "registry-artifact")
 	fs.mkdir(artifact_dir)
 	local pkg_name = opts.name or "app"

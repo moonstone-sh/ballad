@@ -1,90 +1,114 @@
 ---@meta
 
----Ballad's public API. Use `ballad.partiture(...)` to define an export graph and
----`ballad.plugins.*` to pass built-in plugin modules to `p:use(...)`.
----
----Example:
----```lua
----local ballad = require("ballad")
----local my_plugin = require("my_org.codegen_plugin")
----return ballad.partiture(function(p)
----  local moonstone = p:use(ballad.plugins.moonstone)
----  local codegen = p:use(my_plugin)
----end)
----```
+---Ballad's public API. Define a partiture DAG with core `p.source.*` inputs,
+---plugin transforms, and explicit `p.sink.*` outputs.
 ---@class Ballad
----Define a Ballad partiture. The callback receives the pipeline context used to
----import plugins and connect plugin nodes into a deterministic export graph.
----@field partiture fun(fn: fun(p: PipelineContext)): fun(p: PipelineContext)
----Built-in plugin modules. Pass these tables to `p:use(...)`; do not pass string
----module paths for built-ins in new partituras.
----@field plugins BalladBuiltinPlugins
+---@field partiture fun(fn: fun(p: PipelineContext)): fun(p: PipelineContext) Define a partiture callback.
+---@field plugins BalladBuiltinPlugins Built-in plugin contracts for typed `p:use(ballad.plugins.*)` calls.
 
----Built-in plugin modules exposed by Ballad. Each field is a plugin contract table
----that can be passed to `p:use(...)`.
 ---@class BalladBuiltinPlugins
----Finalizes/records emitted outputs such as directories, stdout, and file graphs.
----@field emit EmitPluginContract
----Transforms project assets into portable output layouts such as `libexec`.
----@field layout LayoutPluginContract
----Builds LÖVE game layouts and deterministic `.love` archives.
----@field love LovePluginContract
----Reserved Lua analysis/compile plugin. Methods currently fail until implemented.
----@field lua LuaPluginContract
----Reads a synchronized Moonstone project and exposes manifest/runtime metadata.
----@field moonstone MoonstonePluginContract
----Builds Neovim plugin layouts, metadata, and dependency export hints.
----@field nvim NvimPluginContract
----Creates Moonstone registry descriptors, tarballs, and publish scripts from a layout.
----@field registry RegistryPluginContract
----Bundles a Moonstone runtime into the export.
----@field runtime RuntimePluginContract
+---@field moonstone MoonstonePluginContract Reads Moonstone project metadata.
+---@field layout LayoutPluginContract Builds portable Lua layouts.
+---@field love LovePluginContract Builds LÖVE layouts and `.love` archives.
+---@field registry RegistryPluginContract Builds Moonstone registry descriptors/artifacts.
+---@field nvim NvimPluginContract Builds Neovim plugin layouts and metadata.
+---@field runtime RuntimePluginContract Bundles selected Moonstone runtimes.
+---@field lua LuaPluginContract Reserved Lua compile/check transforms.
+---@field input BalladInputPlugins First-party input providers.
+
+---@class BalladInputPlugins
+---@field moonstone MoonstoneInputPluginContract Resolve Moonstone lockfile packages through `moon store query`.
 
 ---@class PluginContract: table
----@field name string
----@field version string
----@field methods table<string, table>
+---@field name string Fully-qualified plugin name.
+---@field version string Plugin contract version.
+---@field methods table<string, table> Method contract metadata consumed by Ballad.
 
 ---@class MoonstonePluginContract: PluginContract
 ---@field __ballad_type? 'moonstone'
 ---@class LayoutPluginContract: PluginContract
 ---@field __ballad_type? 'layout'
----@class RegistryPluginContract: PluginContract
----@field __ballad_type? 'registry'
----@class EmitPluginContract: PluginContract
----@field __ballad_type? 'emit'
 ---@class LovePluginContract: PluginContract
 ---@field __ballad_type? 'love'
+---@class RegistryPluginContract: PluginContract
+---@field __ballad_type? 'registry'
 ---@class NvimPluginContract: PluginContract
 ---@field __ballad_type? 'nvim'
 ---@class RuntimePluginContract: PluginContract
 ---@field __ballad_type? 'runtime'
 ---@class LuaPluginContract: PluginContract
 ---@field __ballad_type? 'lua'
+---@class MoonstoneInputPluginContract: PluginContract
+---@field __ballad_type? 'input.moonstone'
+
+---@alias BalladDependencyRole 'runtime'|'tool'|'dev'|'helper'|'peer'|'optional'
+---@alias BalladLuaAbi '5.1'|'5.2'|'5.3'|'5.4'|'lua51'|'lua52'|'lua53'|'lua54'|'lua-5.1'|'lua-5.2'|'lua-5.3'|'lua-5.4'
 
 ---@class NodeHandle: table
----@field _id? string
----@field _graph? Graph
----@field name string|nil
----@field version string|nil
----@field root string|nil
----@field runtime string|nil
----@field lua_abi string|nil
----@field registry_name string|nil
----@field description string|nil
----@field [string] any
----@field id? fun(self: NodeHandle): string
----@field metadata? fun(self: NodeHandle): table|nil
+---@field _id? string Internal graph node id.
+---@field _graph? Graph Internal graph reference.
+---@field [string] any Eager metadata exposed by prepare hooks.
+---@field id? fun(self: NodeHandle): string Return graph node id.
+---@field metadata? fun(self: NodeHandle): table|nil Return graph node metadata.
+
+---A Moonstone project handle. Fields are available immediately after `moonstone.project(...)`.
+---@class MoonstoneProject: NodeHandle
+---@field name string Package name from `[package].name`.
+---@field version string Package version from `[package].version`.
+---@field root string|nil Project root path.
+---@field runtime string Runtime spec, e.g. `lua@5.4` or `love@11.5`.
+---@field lua_abi BalladLuaAbi Active Lua ABI.
+---@field registry_name string|nil Registry package name override.
+---@field description string Project description.
+---@field packages MoonstoneResolvedPackage[]|nil Runtime package records enriched by `ballad.plugins.input.moonstone`.
+
+---@class MoonstoneStoreWarning
+---@field code string Machine-readable warning code.
+---@field message string Human-readable warning message.
+
+---@class MoonstoneResolvedPackage
+---@field name string Package name from `moonstone.lock`.
+---@field version string Package version from `moonstone.lock`.
+---@field kind string Package kind from `moonstone.lock`.
+---@field resolver string|nil Package resolver, e.g. `moonstone`, `rocks`, `path`, or `link`.
+---@field roles BalladDependencyRole[]|nil Dependency roles recorded in `moonstone.lock`.
+---@field artifact_hash string Artifact hash selected by `moonstone.lock`.
+---@field source_hash string|nil Source payload hash when available.
+---@field recipe_hash string|nil Recipe hash when available.
+---@field source string|nil Upstream source URL or resolver source identifier.
+---@field source_kind string|nil Source payload kind, e.g. `luarocks_src_rock`, `upstream_archive`, or registry artifact kind.
+---@field source_payload string|nil Relative source payload path inside the local artifact store entry.
+---@field source_payload_path string|nil Absolute local path to the source payload, from `moon store query`.
+---@field rockspec string|nil Upstream rockspec URL when available.
+---@field rockspec_hash string|nil Rockspec BLAKE3 hash when available.
+---@field rockspec_payload string|nil Relative rockspec payload path inside the local artifact store entry.
+---@field rockspec_payload_path string|nil Absolute local path to the rockspec payload, from `moon store query`.
+---@field artifact_path string|nil Absolute local store artifact path, from `moon store query`.
+---@field manifest_path string|nil Absolute local store manifest path, from `moon store query`.
+---@field store_warnings MoonstoneStoreWarning[]|nil Non-fatal query/path diagnostics.
+---@field store_query table|nil Raw `moon store query --json` result for advanced consumers.
+
+---A generic asset-producing transform handle.
+---@class AssetNode: NodeHandle
+
+---A layout asset set suitable for `p.sink.directory`, `registry.package`, or another transform.
+---@class LayoutNode: AssetNode
+
+---A single artifact-producing transform handle suitable for `p.sink.artifact`.
+---@class ArtifactNode: AssetNode
+
+---A registry artifact directory containing `package.toml`, tarball(s), and publish script(s).
+---@class RegistryArtifactNode: ArtifactNode
 
 ---@class Asset
 ---@field id string
----@field kind string
----@field source_path string|nil
----@field virtual_path string|nil
----@field output_path string|nil
----@field content string|nil
----@field generated boolean|nil
----@field metadata table|nil
+---@field kind string Asset kind such as `file`, `generated`, `project`, `package`, `files`, `registry`, `runtime`, or `sink`.
+---@field source_path string|nil Source file path on disk.
+---@field virtual_path string|nil Path inside the pipeline layout.
+---@field output_path string|nil Materialized output path after sinks/native tasks.
+---@field content string|nil Generated file content.
+---@field generated boolean|nil True when content was generated by Ballad.
+---@field metadata table|nil Plugin-specific metadata.
 
 ---@class AssetSet
 ---@field assets Asset[]
@@ -94,66 +118,123 @@
 ---@field count fun(self: AssetSet): integer
 
 ---@class NativeTaskOptions
----@field id string|nil
----@field tool string
----@field args string[]|nil
----@field cwd string|nil
----@field env table<string,string>|nil
----@field inputs string[]|nil
----@field outputs string[]
----@field cacheable boolean|nil
----@field parallel_safe boolean|nil
----@field description string|nil
+---@field id string|nil Stable task id for diagnostics.
+---@field tool string Executable name or absolute/relative path.
+---@field args string[]|nil Command arguments.
+---@field cwd string|nil Working directory, defaults to `.`.
+---@field env table<string,string>|nil Extra environment variables.
+---@field inputs string[]|nil Declared input paths for cache/scheduling.
+---@field outputs string[] Declared output paths; Ballad validates them.
+---@field cacheable boolean|nil Whether task can be cached, defaults to true.
+---@field parallel_safe boolean|nil Whether task may run concurrently, defaults to true.
+---@field description string|nil Human-readable task description.
 
 ---@class PipelineContext
----Collect files from the current working directory into an `AssetSet` using Lua patterns.
----Example: `local lua_files = p:files({ "^src/.*%.lua$" })`.
----@field files fun(self: PipelineContext, pattern_or_patterns: string|string[]): AssetSet
----Create an asset for an existing file path.
----@field asset fun(self: PipelineContext, path: string, opts: table|nil): Asset
----Create an in-memory generated asset that later plugins may emit.
----@field generated fun(self: PipelineContext, path: string, content: string, opts: table|nil): Asset
----Create a raw graph node. Most partituras should prefer plugin methods instead.
----@field node fun(self: PipelineContext, plugin: string, method: string, inputs: NodeHandle[]|nil, opts: table|nil): NodeHandle
----Attach run metadata for diagnostics/debug graph output.
----@field metadata fun(self: PipelineContext, key: string, value: any)
----Emit a non-fatal warning during partiture construction or plugin execution.
----@field warn fun(self: PipelineContext, message: string)
----Abort the pipeline with a user-facing diagnostic.
----@field fail fun(self: PipelineContext, message: string)
----Declare subprocess work with explicit inputs/outputs. Ballad uses these fields for
----cache keys, output validation, and conservative parallel scheduling.
----
----Example:
----```lua
----p:native_task({
----  tool = "zip",
----  args = { "-r", "dist/game.love", "." },
----  cwd = "dist/love-root",
----  outputs = { "dist/game.love" },
----  cacheable = true,
----  parallel_safe = false,
----})
----```
----@field native_task fun(self: PipelineContext, opts: NativeTaskOptions): AssetSet
+---@field source PipelineSourceNamespace Core source nodes.
+---@field sink PipelineSinkNamespace Core sink nodes; every partiture must declare at least one.
+---@field files fun(self: PipelineContext, pattern_or_patterns: string|string[]): AssetSet Legacy direct file collection using Lua patterns.
+---@field asset fun(self: PipelineContext, path: string, opts: AssetOptions|nil): Asset Create an asset for an existing file.
+---@field generated fun(self: PipelineContext, path: string, content: string, opts: GeneratedAssetOptions|nil): Asset Create an in-memory generated asset.
+---@field node fun(self: PipelineContext, plugin: string, method: string, inputs: NodeHandle[]|nil, opts: table|nil): NodeHandle Create a raw transform node.
+---@field metadata fun(self: PipelineContext, key: string, value: any) Attach run metadata.
+---@field warn fun(self: PipelineContext, message: string) Emit a non-fatal warning.
+---@field fail fun(self: PipelineContext, message: string) Abort with a user-facing diagnostic.
+---@field native_task fun(self: PipelineContext, opts: NativeTaskOptions): AssetSet Declare subprocess work.
 
----Import a Ballad plugin into this partiture and return a proxy with that plugin's
----methods. Prefer passing plugin module tables: `p:use(ballad.plugins.moonstone)` or
----`p:use(require("my_org.codegen_plugin"))`.
----
----String names remain available for compatibility, but table imports make plugin
----identity visible in source and avoid name collisions.
+---@class AssetOptions
+---@field kind string|nil
+---@field virtual_path string|nil
+---@field output_path string|nil
+---@field metadata table|nil
+
+---@class GeneratedAssetOptions
+---@field kind string|nil
+---@field output_path string|nil
+---@field metadata table|nil
+
+---Import a plugin. Prefer `ballad.plugins.*`; string literal overloads are provided
+---for existing partituras such as `p:use("moonstone")`.
 ---@param plugin_ref string|PluginContract
 ---@return PluginProxy
 ---@overload fun(self: PipelineContext, plugin_ref: MoonstonePluginContract): MoonstonePlugin
 ---@overload fun(self: PipelineContext, plugin_ref: LayoutPluginContract): LayoutPlugin
----@overload fun(self: PipelineContext, plugin_ref: RegistryPluginContract): RegistryPlugin
----@overload fun(self: PipelineContext, plugin_ref: EmitPluginContract): EmitPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: LovePluginContract): LovePlugin
+---@overload fun(self: PipelineContext, plugin_ref: RegistryPluginContract): RegistryPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: NvimPluginContract): NvimPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: RuntimePluginContract): RuntimePlugin
 ---@overload fun(self: PipelineContext, plugin_ref: LuaPluginContract): LuaPlugin
+---@overload fun(self: PipelineContext, plugin_ref: MoonstoneInputPluginContract): MoonstoneInputPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'moonstone'|'ballad.plugins.moonstone'): MoonstonePlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'layout'|'ballad.plugins.layout'): LayoutPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'love'|'ballad.plugins.love'): LovePlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'registry'|'ballad.plugins.registry'): RegistryPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'nvim'|'ballad.plugins.nvim'): NvimPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'runtime'|'ballad.plugins.runtime'): RuntimePlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'lua'|'ballad.plugins.lua'): LuaPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'input.moonstone'|'ballad.plugins.input.moonstone'): MoonstoneInputPlugin
 if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
+
+---@class PipelineSourceNamespace
+---@field directory fun(path: string, opts: SourceDirectoryOptions|nil): AssetNode Introduce every file below a directory.
+---@field files fun(patterns: string|string[], opts: SourceFilesOptions|nil): AssetNode Introduce files matching glob-style patterns.
+---@field stdin fun(opts: SourceStdinOptions|nil): AssetNode Introduce stdin as a generated asset.
+
+---@class SourceDirectoryOptions
+---@field path string|nil Directory path; supplied by the first argument when omitted.
+---@field root string|nil Alias for `path`.
+---@field label string|nil Node label for diagnostics.
+---@field metadata table|nil Metadata copied to created assets.
+---@field enabled boolean|nil Set false to disable the source.
+---@field progress_weight number|nil Progress weight for planning.
+
+---@class SourceFilesOptions
+---@field root string|nil Root to scan, defaults to `.`.
+---@field patterns string|string[]|nil Glob-style patterns; supplied by first argument.
+---@field label string|nil Node label for diagnostics.
+---@field metadata table|nil Metadata copied to created assets.
+---@field enabled boolean|nil Set false to disable the source.
+---@field progress_weight number|nil Progress weight for planning.
+
+---@class SourceStdinOptions
+---@field name string|nil Virtual file name, defaults to `stdin`.
+---@field kind string|nil Asset kind, defaults to `generated`.
+---@field label string|nil Node label for diagnostics.
+---@field metadata table|nil Metadata copied to created asset.
+---@field enabled boolean|nil Set false to disable the source.
+---@field progress_weight number|nil Progress weight for planning.
+
+---@class PipelineSinkNamespace
+---@field directory fun(input: NodeHandle, opts: SinkDirectoryOptions): NodeHandle Materialize assets into a directory.
+---@field stdout fun(input: NodeHandle, opts: SinkStdoutOptions|nil): NodeHandle Print asset/file graph data to stdout.
+---@field file_graph fun(input: NodeHandle, opts: SinkFileGraphOptions): NodeHandle Write a `file-graph.json`-style JSON file.
+---@field artifact fun(input: NodeHandle, opts: SinkArtifactOptions): NodeHandle Materialize a single artifact path or directory.
+
+---@class SinkDirectoryOptions
+---@field out string Output directory.
+---@field path string|nil Alias for `out`.
+---@field file_graph boolean|nil Also write `file-graph.json` inside the output directory.
+---@field label string|nil Node label for diagnostics.
+---@field enabled boolean|nil Set false to disable the sink.
+---@field progress_weight number|nil Progress weight for planning.
+
+---@class SinkStdoutOptions
+---@field file_graph boolean|nil Print full file graph instead of the flat asset list.
+---@field label string|nil Node label for diagnostics.
+---@field enabled boolean|nil Set false to disable the sink.
+---@field progress_weight number|nil Progress weight for planning.
+
+---@class SinkFileGraphOptions
+---@field out string Output JSON path.
+---@field path string|nil Alias for `out`.
+---@field label string|nil Node label for diagnostics.
+---@field enabled boolean|nil Set false to disable the sink.
+---@field progress_weight number|nil Progress weight for planning.
+
+---@class SinkArtifactOptions
+---@field out string Output file or directory path.
+---@field label string|nil Node label for diagnostics.
+---@field enabled boolean|nil Set false to disable the sink.
+---@field progress_weight number|nil Progress weight for planning.
 
 ---@class PluginCtx
 ---@field graph Graph
@@ -170,102 +251,139 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field _ctx? PipelineContext
 ---@field [string] fun(input_or_opts: NodeHandle|table|nil, opts: table|nil): NodeHandle
 
+---@class MoonstoneProjectOptions
+---@field root string|nil Project root, defaults to `.`.
+---@field roles BalladDependencyRole[]|nil Lockfile roles to include; defaults to `{ "runtime" }`.
+---@field moon string|nil Moonstone executable for local store queries; defaults to `moon`.
+---@field moon_bin string|nil Alias for `moon`.
+
 ---@class MoonstonePlugin: PluginProxy
----Read `moonstone.toml`, `moonstone.lock`, and `.moonstone/env/env.toml` from a
----synchronized Moonstone project. The returned handle eagerly exposes common fields
----such as `name`, `version`, `runtime`, `lua_abi`, `registry_name`, and `description`.
----
----Example:
----```lua
----local moonstone = p:use(ballad.plugins.moonstone)
----local project = moonstone.project({ root = "." })
----```
----@field project fun(opts: { root: string|nil }): NodeHandle
+---@field project fun(opts: MoonstoneProjectOptions|nil): MoonstoneProject Read `moonstone.toml`, lockfile, and `.moonstone/env` metadata.
+
+---@class MoonstoneInputOptions
+---@field root string|nil Project root, defaults to `.`.
+---@field roles BalladDependencyRole[]|nil Lockfile roles to include; defaults to `{ "runtime" }`.
+---@field moon string|nil Moonstone executable for local store queries; defaults to `moon`.
+---@field moon_bin string|nil Alias for `moon`.
+
+---@class MoonstonePackagesNode: AssetNode
+---@field root string Project root.
+---@field packages MoonstoneResolvedPackage[] Enriched packages selected from `moonstone.lock`.
+
+---@class MoonstoneInputPlugin: PluginProxy
+---@field packages fun(opts: MoonstoneInputOptions|nil): MoonstonePackagesNode Read `moonstone.lock` and enrich selected packages via `moon store query`.
+---@field enrich_packages fun(packages: table[]|nil, opts: MoonstoneInputOptions|nil): MoonstoneResolvedPackage[] Enrich lockfile package records via `moon store query`.
+
+---@class LayoutLibexecOptions
+---@field name string|nil App directory name under `libexec/`, defaults to `app`.
+---@field entry string|nil Entry script inside the app tree, defaults to `src/main.lua`.
+---@field bin string|nil Launcher name under `bin/`, defaults to `name` or `app`.
+---@field interpreter string|nil Interpreter used by launcher, defaults to `lua`.
+
+---@class LayoutFlatOptions
+---@field name string|nil Package/app name.
+---@field entry string|nil Entry script, defaults to `src/main.lua`.
+---@field kind string|nil Package kind, e.g. `script`, `bin`, or `lib`.
+---@field bin string|nil Launcher name when runnable.
+---@field interpreter string|nil Interpreter used by launcher, defaults to `lua`.
+---@field runnable boolean|nil Whether to generate a launcher.
+
+---@class LayoutLoveOptions: LoveLayoutOptions
 
 ---@class LayoutPlugin: PluginProxy
----Create a relocatable `libexec/<name>/` tree plus a launcher in `bin/<bin>`.
----Use this for Lua CLIs/tools such as Ballad itself.
----
----Example:
----```lua
----local app = layout.libexec(project, {
----  name = "ballad",
----  entry = "src/main.lua",
----  bin = "ballad",
----  interpreter = "luajit",
----})
----```
----@field libexec fun(project: NodeHandle, opts: { name: string|nil, entry: string|nil, bin: string|nil, interpreter: string|nil, out: string|nil }): NodeHandle
----Reserved flat output layout. Currently not implemented.
----@field flat fun(project: NodeHandle, opts: table|nil): NodeHandle
----Legacy layout hook name; prefer `ballad.plugins.love` for LÖVE projects.
----@field love fun(project: NodeHandle, opts: table|nil): NodeHandle
+---@field libexec fun(project: MoonstoneProject, opts: LayoutLibexecOptions): LayoutNode Build `libexec/<name>/` plus `bin/<bin>` launcher assets.
+---@field flat fun(project: MoonstoneProject, opts: LayoutFlatOptions|nil): LayoutNode Build a root-relative Lua layout.
+---@field love fun(project: MoonstoneProject, opts: LayoutLoveOptions|nil): LayoutNode Legacy LÖVE layout hook; prefer `ballad.plugins.love.layout`.
 
----@class RegistryPlugin: PluginProxy
----Create a Moonstone registry artifact from a layout node. Emits
----`registry-artifact/package.toml`, a deterministic tarball, and `publish.sh`.
----
----Example:
----```lua
----registry.package(app, {
----  name = project.registry_name or "moonstone/ballad",
----  version = project.version,
----  target = "any",
----  runtime = project.runtime,
----  lua_abi = project.lua_abi,
----})
----```
----@field package fun(layout: NodeHandle, opts: table): NodeHandle
+---@class LoveLayoutOptions
+---@field main string|nil Path to `main.lua`, defaults to `main.lua`.
+---@field conf string|nil Optional `conf.lua` path.
+---@field include string[]|nil Glob patterns to include; defaults to all non-excluded files.
+---@field exclude string[]|nil Glob patterns to exclude; defaults to `.moonstone/**`, `.ballad/**`, `dist/**`, `.git/**`.
+---@field runtime string|nil Runtime dependency metadata, defaults to `love@11.5`.
+---@field lua_api string|nil Lua API metadata, defaults to `love-11`.
+---@field lua_abi BalladLuaAbi|nil Lua ABI metadata, defaults to `5.1`.
 
----@class EmitPlugin: PluginProxy
----Finalize a layout by writing compatibility metadata such as `file-graph.json`.
----Most layout plugins already copy files; this node records the chosen output as a sink.
----
----Example: `emit.directory(app, { out = "dist/ballad", file_graph = true })`.
----@field directory fun(input: NodeHandle, opts: { out: string|nil, file_graph: boolean|nil }): NodeHandle
----Print a JSON representation of the first input asset to stdout. Useful for debugging
----intermediate plugin outputs in small partituras.
----@field stdout fun(input: NodeHandle, opts: table|nil): NodeHandle
+---@class LovePackOptions
+---@field out string|nil Output `.love` path, defaults to `dist/<project>.love`.
+---@field tool string|nil Zip tool for non-deterministic mode, defaults to `zip`.
+---@field deterministic boolean|nil Use deterministic built-in zip writer, defaults to true.
 
 ---@class LovePlugin: PluginProxy
----Create a LÖVE project root from a Moonstone project. Preserves game files in a
----LÖVE-compatible layout and prepares metadata for registry packaging.
----
----Example:
----```lua
----local love = p:use(ballad.plugins.love)
----local root = love.layout(project, { out = "dist/love-root", name = "my-game" })
----```
----@field layout fun(project: NodeHandle, opts: table|nil): NodeHandle
----Pack a LÖVE layout into a deterministic `.love` archive. Declares a native task and
----validates the archive output.
----@field pack fun(layout: NodeHandle, opts: table|nil): NodeHandle
+---@field layout fun(project: MoonstoneProject, opts: LoveLayoutOptions): LayoutNode Build a LÖVE-compatible asset layout.
+---@field pack fun(layout: LayoutNode, opts: LovePackOptions|nil): ArtifactNode Pack a LÖVE layout into a `.love` archive asset.
+
+---@class RegistryPackageOptions
+---@field name string Package name to put in `package.toml`, e.g. `moonstone/ballad`.
+---@field version string Package version.
+---@field target string|nil Artifact target, defaults to `any`.
+---@field runtime string|nil Runtime requirement, e.g. `moonstone/luajit@2.1.0`.
+---@field lua_abi BalladLuaAbi|nil Lua ABI metadata, defaults to `5.1`.
+---@field lua_api string|nil Lua API metadata.
+---@field kind string|nil Package kind, defaults to layout metadata or `bin`.
+---@field artifact_kind string|nil Artifact kind, defaults to layout metadata or `bin`.
+---@field description string|nil Package description.
+
+---@class RegistryRuntimeOptions
+---@field name string|nil Runtime name, defaults to env `RUNTIME_NAME` or `lua`.
+---@field version string Runtime version; required unless `RUNTIME_VERSION` is set.
+---@field artifacts_dir string|nil Directory containing runtime artifacts.
+---@field out string|nil Output directory for descriptor and publish script.
+---@field registry_url string|nil Publish endpoint URL.
+---@field token string|nil Publish token.
+---@field publish boolean|string|nil Publish immediately when true.
+---@field lua_abi BalladLuaAbi|nil Runtime Lua ABI.
+---@field lua_api string|nil Runtime Lua API.
+---@field description string|nil Runtime package description.
+---@field bins table<string,string>|nil Provided binaries, mapping name to path.
+
+---@class RegistryPlugin: PluginProxy
+---@field package fun(layout: LayoutNode, opts: RegistryPackageOptions): RegistryArtifactNode Build registry `package.toml`, tarball, and publish script from a layout.
+---@field runtime fun(opts: RegistryRuntimeOptions): RegistryArtifactNode Build registry descriptor/publish script for prebuilt runtime artifacts.
+
+---@class NvimDependencySpec
+---@field role BalladDependencyRole Dependency role.
+---@field package string|nil Registry package reference, e.g. `nvim-lua/plenary.nvim`.
+---@field constraint string|nil Version constraint, e.g. `*` or `^1.0`.
+---@field optional boolean|nil Marks optional dependency.
+
+---@class NvimLayoutOptions
+---@field module string|nil Top-level Lua module name, e.g. `my_plugin`.
+---@field include string[]|nil Glob patterns for files to include.
+---@field exclude string[]|nil Glob patterns for files to exclude.
+---@field runtime string|nil Runtime requirement metadata, e.g. `nvim@0.10`.
+---@field lua_api string|nil API metadata, e.g. `nvim-0.10`.
+---@field lua_abi BalladLuaAbi|nil Lua ABI metadata.
+---@field dependencies table<string,NvimDependencySpec>|nil Declared plugin dependencies.
+---@field unresolved 'warn'|'fail'|nil Behavior for unknown `require` calls, defaults to `warn`.
+
+---@class NvimHelptagsOptions
+---@field doc string|nil Directory containing help files, defaults to `doc`.
+
+---@class NvimDiscoverOptions
+---@field unresolved 'warn'|'fail'|nil Behavior for unknown `require` calls.
 
 ---@class NvimPlugin: PluginProxy
----Create a Neovim plugin layout with `lua/`, `plugin/`, `doc/`, and dependency metadata.
----Use this for exporting packages intended for Neovim's runtime path.
----
----Example:
----```lua
----local nvim = p:use(ballad.plugins.nvim)
----local plugin = nvim.layout(project, { out = "dist/nvim-plugin", module = "my_plugin" })
----```
----@field layout fun(layout: NodeHandle, opts: table|nil): NodeHandle
----Generate helptags for a Neovim plugin layout when supported by the environment.
----@field helptags fun(layout: NodeHandle, opts: table|nil): NodeHandle
----Scan a Neovim plugin layout and emit metadata about modules, requires, and unresolved
----dependency hints.
----@field discover fun(layout: NodeHandle, opts: table|nil): NodeHandle
+---@field layout fun(project: MoonstoneProject, opts: NvimLayoutOptions|nil): LayoutNode Build a Neovim runtimepath-compatible layout.
+---@field helptags fun(layout: LayoutNode, opts: NvimHelptagsOptions|nil): LayoutNode Generate or declare helptags for `doc/*.txt`.
+---@field discover fun(layout: LayoutNode, opts: NvimDiscoverOptions|nil): LayoutNode Scan modules/requires and attach dependency metadata.
+
+---@class RuntimeBundleOptions
+---@field enabled boolean|nil Set false to skip bundling.
+---@field include_runtime boolean|nil Set false to skip bundling.
+---@field mode 'bundled'|'external'|nil `external` skips bundling.
 
 ---@class RuntimePlugin: PluginProxy
----Bundle a Moonstone runtime into the export.
----@field bundle fun(input: NodeHandle, opts: table|nil): NodeHandle
+---@field bundle fun(input: NodeHandle, opts: RuntimeBundleOptions|nil): LayoutNode Add selected Moonstone runtime files to an asset set.
+
+---@class LuaCompileOptions
+---@field enabled boolean|nil Reserved.
+---@class LuaCheckOptions
+---@field enabled boolean|nil Reserved.
 
 ---@class LuaPlugin: PluginProxy
----Reserved Lua compile method. Currently fails until implemented.
----@field compile fun(input: NodeHandle, opts: table|nil): NodeHandle
----Reserved Lua check method. Currently fails until implemented.
----@field check fun(input: NodeHandle, opts: table|nil): NodeHandle
+---@field compile fun(input: NodeHandle, opts: LuaCompileOptions|nil): AssetNode Reserved compile transform; currently fails until implemented.
+---@field check fun(input: NodeHandle, opts: LuaCheckOptions|nil): AssetNode Reserved static-check transform; currently fails until implemented.
 
 ---@class Graph
 ---@field nodes table<string, table>
@@ -275,4 +393,3 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@type Ballad
 local ballad
 return ballad
-

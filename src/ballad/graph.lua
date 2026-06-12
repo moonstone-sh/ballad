@@ -5,7 +5,7 @@
 ---@field kind string one of: file, generated, project, package, files, registry, emit
 ---@field source_path string|nil actual input file path, if copied from disk
 ---@field virtual_path string|nil path inside the pipeline layout
----@field output_path string|nil final emitted path, usually assigned by emit plugin
+---@field output_path string|nil materialized path assigned by sinks or native tasks
 ---@field content string|nil only for generated assets
 ---@field generated boolean
 ---@field metadata table<string, any>
@@ -86,13 +86,17 @@ end
 ---@field id string
 ---@field plugin string
 ---@field method string
+---@field role "source"|"transform"|"sink"
+---@field label string|nil
 ---@field inputs string[] node ids
 ---@field outputs string[] node ids
 ---@field options table<string, any>
 ---@field metadata table<string, any>
 ---@field effects string[]
+---@field progress_weight number
 ---@field cacheable boolean
 ---@field parallel_safe boolean
+---@field enabled boolean
 ---@field executed boolean
 ---@field result AssetSet|nil
 local Node = {}
@@ -106,13 +110,17 @@ function Node.new(opts)
     id = opts.id or "node_0",
     plugin = opts.plugin or "unknown",
     method = opts.method or "unknown",
+    role = opts.role or "transform",
+    label = opts.label or nil,
     inputs = opts.inputs or {},
     outputs = opts.outputs or {},
     options = opts.options or {},
     metadata = opts.metadata or {},
     effects = opts.effects or {},
+    progress_weight = opts.progress_weight or 1,
     cacheable = opts.cacheable ~= false,
     parallel_safe = opts.parallel_safe ~= false,
+    enabled = opts.enabled ~= false,
     executed = false,
     result = nil,
   }, Node)
@@ -168,11 +176,16 @@ function Graph:add_node(opts)
     id = id,
     plugin = opts.plugin,
     method = opts.method,
+    role = opts.role,
+    label = opts.label,
     inputs = opts.inputs or {},
     options = opts.options or {},
     metadata = opts.metadata or {},
+    effects = opts.effects or {},
+    progress_weight = opts.progress_weight,
     cacheable = opts.cacheable,
     parallel_safe = opts.parallel_safe,
+    enabled = opts.enabled,
   })
   self.nodes[id] = node
   for _, input_id in ipairs(node.inputs) do
@@ -264,18 +277,17 @@ function Graph:add_native_task(task)
 end
 
 function Graph:sink_nodes()
-  local has_children = {}
-  for id, children in pairs(self.edges) do
-    if #children > 0 then
-      has_children[id] = true
-    end
-  end
+  return self:terminal_sinks()
+end
+
+function Graph:terminal_sinks()
   local sinks = {}
   for id, node in pairs(self.nodes) do
-    if not has_children[id] then
+    if node.role == "sink" and node.enabled ~= false then
       table.insert(sinks, node)
     end
   end
+  table.sort(sinks, function(a, b) return a.id < b.id end)
   return sinks
 end
 
@@ -287,12 +299,16 @@ function Graph:to_json()
       id = node.id,
       plugin = node.plugin,
       method = node.method,
+      role = node.role,
+      label = node.label,
       inputs = node.inputs,
       options = node.options,
       metadata = node.metadata,
       effects = node.effects,
+      progress_weight = node.progress_weight,
       cacheable = node.cacheable,
       parallel_safe = node.parallel_safe,
+      enabled = node.enabled,
       executed = node.executed,
     }
   end

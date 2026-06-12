@@ -112,9 +112,9 @@ function cli.main(args)
     print("Partiture loaded: " .. options.partiture_file)
     print("Executing pipeline graph...")
     local results = p:execute()
-    print("Pipeline completed. " .. #results .. " sink node(s) produced output.")
+    print("Pipeline completed. " .. #results .. " explicit sink(s) produced output.")
     for i, sink in ipairs(results) do
-      print("  Sink " .. i .. ": " .. sink.node.plugin .. "." .. sink.node.method)
+      print("  Output " .. i .. ": " .. sink.node.method)
       if sink.result and sink.result.assets then
         local assets = sink.result.assets
         print("    assets=" .. #assets)

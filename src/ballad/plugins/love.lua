@@ -81,8 +81,6 @@ return {
 
     local meta = project_asset.metadata
     local root = meta.root
-    local out_dir = opts.out or "dist/love-root"
-
     local main_file = opts.main or "main.lua"
     local main_path = path.join(root, main_file)
     if not fs.read_file(main_path) then
@@ -95,9 +93,6 @@ return {
         ctx.fail("love.layout: conf.lua not found at " .. conf_path)
       end
     end
-
-    fs.remove_tree(out_dir)
-    fs.mkdir(out_dir)
 
     local include_patterns = opts.include
     local exclude_patterns = opts.exclude or {
@@ -141,13 +136,10 @@ return {
 
     local assets = graph.AssetSet.new()
     for _, item in ipairs(included) do
-      local dest = path.join(out_dir, item.rel)
-      fs.copy_file(item.src, dest)
       local asset = ctx.graph:add_asset({
         kind = "file",
         source_path = item.src,
         virtual_path = item.rel,
-        output_path = dest,
         metadata = { plugin = "love", method = "layout" },
       })
       assets:add(asset)
@@ -155,9 +147,9 @@ return {
 
     assets:add(ctx.graph:add_asset({
       kind = "files",
-      virtual_path = out_dir,
-      output_path = out_dir,
+      virtual_path = "love-root",
       metadata = {
+        name = meta.manifest and meta.manifest.package and meta.manifest.package.name or "app",
         entry = main_file,
         libexec_root = "",
         bin_name = meta.manifest and meta.manifest.package and meta.manifest.package.name or "app",
@@ -192,7 +184,6 @@ return {
       ctx.fail("love.pack requires a love.layout node as input")
     end
 
-    local out_dir = files_asset.output_path
     local out_file = opts.out or ("dist/" .. (files_asset.metadata.name or "app") .. ".love")
 
     local use_deterministic = opts.deterministic ~= false
@@ -200,11 +191,23 @@ return {
     if not use_deterministic then
       -- Fallback: system zip via native_task
       local abs_out = path.absolute(out_file)
+      local staging = ".ballad/tmp/love-pack-" .. tostring(ctx.node.id)
+      fs.remove_tree(staging)
+      fs.mkdir(staging)
+      for _, asset in ipairs(inputs[1].assets) do
+        if asset.kind ~= "files" and asset.kind ~= "project" and asset.source_path then
+          fs.copy_file(asset.source_path, path.join(staging, asset.virtual_path or path.basename(asset.source_path)))
+        elseif asset.kind ~= "files" and asset.kind ~= "project" and asset.generated and asset.content then
+          local dest = path.join(staging, asset.virtual_path or asset.id)
+          fs.mkdir(path.dirname(dest))
+          fs.write_file(dest, asset.content)
+        end
+      end
       return ctx:native_task({
         id = "love.pack",
         tool = opts.tool or "zip",
         args = { "-r", abs_out, "." },
-        cwd = out_dir,
+        cwd = staging,
         outputs = { out_file },
         cacheable = true,
         parallel_safe = false,
@@ -215,12 +218,14 @@ return {
     -- Deterministic zip writer
     local archive = require("ballad.archive")
     local entries = {}
-    for _, f in ipairs(fs.list_files(out_dir)) do
-      local rel = path.relative(f, out_dir)
-      table.insert(entries, {
-        path = rel,
-        src = f,
-      })
+    for _, asset in ipairs(inputs[1].assets) do
+      if asset.kind ~= "files" and asset.kind ~= "project" then
+        table.insert(entries, {
+          path = asset.virtual_path or asset.id,
+          src = asset.source_path,
+          data = asset.content,
+        })
+      end
     end
 
     fs.mkdir(path.dirname(out_file))

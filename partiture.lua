@@ -4,7 +4,6 @@ return ballad.partiture(function(p)
 	local moonstone = p:use(ballad.plugins.moonstone)
 	local layout = p:use(ballad.plugins.layout)
 	local registry = p:use(ballad.plugins.registry)
-	local emit = p:use(ballad.plugins.emit)
 
 	local project = moonstone.project({
 		root = ".",
@@ -17,7 +16,7 @@ return ballad.partiture(function(p)
 		interpreter = "luajit",
 	})
 
-	registry.package(app, {
+	local registry_artifact = registry.package(app, {
 		name = project.registry_name or "moonstone/ballad",
 		version = project.version,
 		target = "any",
@@ -26,8 +25,11 @@ return ballad.partiture(function(p)
 		description = project.description,
 	})
 
-	emit.directory(app, {
+	p.sink.directory(app, {
 		out = "dist/ballad",
 		file_graph = true,
+	})
+	p.sink.artifact(registry_artifact, {
+		out = "dist/ballad/registry-artifact",
 	})
 end)
