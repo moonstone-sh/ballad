@@ -18,6 +18,31 @@ local fs = require("ballad.fs")
 local path = require("ballad.path")
 local process = require("ballad.process")
 
+local function local_package_name(name)
+  local local_name = name:match("/([^/]+)$") or name
+  return (local_name:gsub("%-", "_"))
+end
+
+local function export_filter(meta)
+  local excluded = {}
+  local dependencies = meta.dependencies or {}
+  for _, role in ipairs({ "dev", "tool", "peer", "optional" }) do
+    for dep_name, _ in pairs(dependencies[role] or {}) do
+      excluded[local_package_name(dep_name)] = true
+    end
+  end
+
+  return function(relative, source)
+    local module_name = relative:gsub("%.lua$", ""):gsub("/init$", "")
+    local top = module_name:match("^([^/]+)") or module_name
+    if excluded[top] then return false end
+    for name, _ in pairs(excluded) do
+      if source and source:match("/" .. name .. "/src/") then return false end
+    end
+    return true
+  end
+end
+
 ---Convert a glob pattern to a Lua pattern for matching.
 ---@param glob string
 ---@return string
@@ -49,7 +74,7 @@ end
 
 return {
   name = "ballad.plugins.love",
-  version = "0.1.0",
+  version = "0.1.1",
 
   methods = {
     layout = {
@@ -135,6 +160,8 @@ return {
     end
 
     local assets = graph.AssetSet.new()
+    local should_export = export_filter(meta)
+
     for _, item in ipairs(included) do
       local asset = ctx.graph:add_asset({
         kind = "file",
@@ -143,6 +170,44 @@ return {
         metadata = { plugin = "love", method = "layout" },
       })
       assets:add(asset)
+    end
+
+    -- Lua modules
+    local module_root = path.join(meta.root, ".moonstone/env/share/lua", (meta.abi:gsub("^lua%-", ""):gsub("^lua", "")))
+    if fs.is_dir(module_root) then
+      for _, module_path in ipairs(fs.list_files(module_root)) do
+        if fs.is_lua(module_path) then
+          local relative = path.relative(module_path, module_root)
+          local source = fs.readlink(module_path)
+          if should_export(relative, source) then
+            assets:add(ctx.graph:add_asset({
+              kind = "package",
+              source_path = source,
+              virtual_path = relative,
+              metadata = { plugin = "love", method = "layout", dependency = true },
+            }))
+          end
+        end
+      end
+    end
+
+    -- C modules
+    local lib_module_root = path.join(meta.root, ".moonstone/env/lib/lua", (meta.abi:gsub("^lua%-", ""):gsub("^lua", "")))
+    if fs.is_dir(lib_module_root) then
+      for _, module_path in ipairs(fs.list_files(lib_module_root)) do
+        if fs.is_binary_module(module_path) then
+          local relative = path.relative(module_path, lib_module_root)
+          local source = fs.readlink(module_path)
+          if should_export(relative, source) then
+            assets:add(ctx.graph:add_asset({
+              kind = "package",
+              source_path = source,
+              virtual_path = relative,
+              metadata = { plugin = "love", method = "layout", dependency = true },
+            }))
+          end
+        end
+      end
     end
 
     assets:add(ctx.graph:add_asset({
