@@ -1,169 +1,5 @@
 local registry = {}
 
-function registry.on_finalize(ctx)
-	local fs = require("ballad.fs")
-	local path = require("ballad.path")
-	local process = require("ballad.process")
-
-	local pkg_name = ctx.manifest.package and ctx.manifest.package.name or "app"
-	local version = ctx.manifest.package and ctx.manifest.package.version or "0.0.0"
-	local local_name = pkg_name:match("/([^/]+)$") or pkg_name
-
-	local target = ctx.export.target or "any"
-
-	-- We create the artifact in a subdirectory to avoid including it in the tarball
-	local artifact_dir = path.join(ctx.out_dir, "registry-artifact")
-	fs.mkdir(artifact_dir)
-
-	local tarball_name = local_name .. "-" .. version .. "-" .. target .. ".tar.gz"
-	local tarball_path = path.join(artifact_dir, tarball_name)
-
-	print("Creating registry artifact: " .. tarball_name)
-
-	-- Tar up the parent directory (ctx.out_dir) but exclude the registry-artifact dir
-	local tar_cmd = string.format(
-		"cd %s && tar --exclude='./registry-artifact' -czf %s .",
-		process.quote(ctx.out_dir),
-		process.quote(tarball_path)
-	)
-
-	if not process.command_ok(tar_cmd) then
-		ctx.fail("failed to create tarball")
-	end
-
-	local blob_hash = "b3:" .. process.b3sum(tarball_path)
-	local blob_bytes = tonumber(process.capture("stat -f%z " .. process.quote(tarball_path))) or 0
-
-	-- Generate Recipe
-	local provides_list = {}
-	if ctx.preparer then
-		if target == "any" then
-			table.insert(provides_list, "bin_lua:" .. ctx.preparer.bin_name .. ":" .. ctx.options.main)
-		else
-			table.insert(provides_list, "bin:" .. ctx.preparer.bin_name .. ":bin/" .. ctx.preparer.bin_name)
-		end
-	end
-
-	local recipe_text = table.concat({
-		"schema=moonstone.recipe.v0",
-		"kind=prebuilt-artifact",
-		"name=" .. pkg_name,
-		"version=" .. version,
-		"materializer=archive",
-		"target=" .. target,
-		"provides=" .. table.concat(provides_list, ","),
-		"",
-	}, "\n")
-
-	local recipe_hash = "b3:" .. process.b3sum_string(recipe_text)
-
-	-- Generate package.toml
-	local digest = blob_hash:sub(4)
-	local url = string.format("blobs/b3/%s/%s/%s.tar.gz", digest:sub(1, 2), digest:sub(3, 4), digest)
-
-	local description = ctx.manifest.package.description
-	if not description or description == "" then
-		description = "Exported " .. pkg_name .. " package"
-	end
-
-	local abi = ctx.project.lua_abi
-	if abi == "lua51" then
-		abi = "5.1"
-	elseif abi == "lua52" then
-		abi = "5.2"
-	elseif abi == "lua53" then
-		abi = "5.3"
-	elseif abi == "lua54" then
-		abi = "5.4"
-	end
-
-	-- Runtime dependency and provides section
-	local runtime_field = ""
-	local provides_section = ""
-
-	if target == "any" then
-		if ctx.export.runtime then
-			runtime_field = string.format('runtime = "%s"', ctx.export.runtime)
-		end
-		provides_section = [=[
-[[artifacts.provides]]
-kind = "bin_lua"
-name = "]=] .. (ctx.preparer and ctx.preparer.bin_name or local_name) .. [=["
-path = "bin/]=] .. (ctx.preparer and ctx.preparer.bin_name or local_name) .. [=["
-entry_point = "]=] .. ctx.preparer.libexec_root .. "/" .. ctx.options.main .. [=["
-]=]
-	else
-		provides_section = [=[
-[[artifacts.provides]]
-kind = "bin"
-name = "]=] .. (ctx.preparer and ctx.preparer.bin_name or local_name) .. [=["
-path = "bin/]=] .. (ctx.preparer and ctx.preparer.bin_name or local_name) .. [=["
-]=]
-	end
-
-	-- Standalone runtime metadata
-	local runtime_bundled_section = ""
-	if ctx.export.mode == "standalone" and ctx.export.bundled_runtime then
-		local rb = ctx.export.bundled_runtime
-		runtime_bundled_section = string.format(
-			'\n[runtime_bundled]\nname = "%s"\nversion = "%s"\ntarget = "%s"\nartifact_hash = "%s"\n',
-			rb.name,
-			rb.version,
-			target,
-			rb.artifact_hash
-		)
-	end
-
-	local package_toml = [=[
-[package]
-name = "]=] .. pkg_name .. [=["
-version = "]=] .. version .. [=["
-kind = "bin"
-description = "]=] .. description .. [=["
-]=] .. runtime_bundled_section .. [=[
-
-[[artifacts]]
-      'id = "' .. (opts.artifact_kind or meta.artifact_kind or "bin") .. '-' .. target .. '"',
-kind = "bin"
-target = "]=] .. target .. [=["
-lua_api = "]=] .. (ctx.project.lua_abi:gsub("^lua", "")) .. [=["
-lua_abi = "]=] .. abi .. [=["
-format = "tar.gz"
-url = "]=] .. url .. [=["
-hash = "]=] .. blob_hash .. [=["
-recipe_hash = "]=] .. recipe_hash .. [=["
-bytes = ]=] .. tostring(blob_bytes) .. [[
-]] .. runtime_field .. [=[
-
-[artifacts.materialize]
-type = "archive"
-strip_components = 0
-
-]=] .. provides_section
-
-	fs.write_file(path.join(artifact_dir, "package.toml"), package_toml)
-
-	-- Generate publish.sh
-	local publish_sh = [[
-#!/usr/bin/env sh
-set -eu
-: "${MOONSTONE_TOKEN:?Set MOONSTONE_TOKEN to a write:registry API token}"
-curl --fail-with-body \
-  -H "Authorization: Bearer $MOONSTONE_TOKEN" \
-  -F descriptor=@"$(dirname "$0")/package.toml" \
-  -F blob=@"$(dirname "$0")/]] .. tarball_name .. [[" \
-  "${MOONSTONE_PUBLISH_URL:-https://moonstone.sh/api/registry/v0/publish}"
-]]
-
-	local publish_path = path.join(artifact_dir, "publish.sh")
-	fs.write_file(publish_path, publish_sh)
-	fs.chmod(publish_path, "+x")
-
-	print("Registry artifact ready in " .. artifact_dir)
-	print("To publish, run: MOONSTONE_TOKEN=... " .. publish_path)
-end
-
--- New contract-based interface (Stage 2 pipeline)
 local graph = require("ballad.graph")
 local fs = require("ballad.fs")
 local path = require("ballad.path")
@@ -186,6 +22,21 @@ registry.methods = {
 		parallel_safe = true,
 	},
 }
+
+local function normalize_runtime_spec(value)
+	if type(value) == "string" then
+		if value == "" or value:match("^table:%s*") then return nil end
+		return value
+	end
+	if type(value) ~= "table" then return nil end
+	if type(value.runtime_spec) == "string" and value.runtime_spec ~= "" then return value.runtime_spec end
+	if type(value.spec) == "string" and value.spec ~= "" then return value.spec end
+	if type(value.id) == "string" and value.id ~= "" then return value.id end
+	if type(value.name) == "string" and value.name ~= "" and type(value.version) == "string" and value.version ~= "" then
+		return value.name .. "@" .. value.version
+	end
+	return nil
+end
 
 registry.package = function(ctx, inputs, opts)
 	local files_asset = nil
@@ -226,7 +77,7 @@ registry.package = function(ctx, inputs, opts)
 	local pkg_name = opts.name or "app"
 	local version = opts.version or "0.0.0"
 	local target = opts.target or "any"
-	local runtime = opts.runtime or nil
+	local runtime = normalize_runtime_spec(opts.runtime or opts.runtime_spec)
 	local lua_abi = opts.lua_abi or "5.1"
 	local local_name = pkg_name:match("/([^/]+)$") or pkg_name
 	local tarball_name = local_name .. "-" .. version .. "-" .. target .. ".tar.gz"
@@ -416,6 +267,7 @@ end
 
 registry.runtime = function(ctx, inputs, opts)
 	local name = opts.name or os.getenv("RUNTIME_NAME") or "lua"
+	local package_name = opts.package_name or os.getenv("RUNTIME_PACKAGE_NAME") or name
 	local version = opts.version or os.getenv("RUNTIME_VERSION")
 	if not version or version == "" then ctx.fail("registry.runtime requires opts.version or RUNTIME_VERSION") end
 	local artifacts_dir = opts.artifacts_dir or os.getenv("RUNTIME_ARTIFACTS_DIR") or "scripts/runtime/artifacts"
@@ -428,12 +280,13 @@ registry.runtime = function(ctx, inputs, opts)
 	local bins = runtime_bin_provides(name, opts)
 
 	fs.mkdir(out_dir)
-	local descriptor_path = path.join(out_dir, name .. "-" .. version .. "-package.toml")
-	local publish_path = path.join(out_dir, "publish-" .. name .. "-" .. version .. ".sh")
+	local descriptor_stem = package_name:gsub("/", "-")
+	local descriptor_path = path.join(out_dir, descriptor_stem .. "-" .. version .. "-package.toml")
+	local publish_path = path.join(out_dir, "publish-" .. descriptor_stem .. "-" .. version .. ".sh")
 	local artifact_paths = {}
 	local package_lines = {
 		"[package]",
-		'name = "' .. name .. '"',
+		'name = "' .. package_name .. '"',
 		'version = "' .. version .. '"',
 		'kind = "runtime"',
 		'description = "' .. (opts.description or (name .. " runtime packaged for Moonstone")) .. '"',
@@ -505,12 +358,14 @@ registry.runtime = function(ctx, inputs, opts)
 
 	if publish_now then
 		if token == "" then ctx.fail("registry.runtime publish requires MOONSTONE_PUBLISH_TOKEN or MOONSTONE_TOKEN") end
+		print("Publishing runtime " .. package_name .. " " .. version .. " with " .. tostring(#artifact_paths) .. " artifact(s) to " .. registry_url)
 		local curl_cmd = "curl --fail-with-body -H " .. process.quote("Authorization: Bearer " .. token) .. " -F descriptor=@" .. process.quote(descriptor_path)
 		for _, artifact in ipairs(artifact_paths) do
 			curl_cmd = curl_cmd .. " -F blob=@" .. process.quote(artifact)
 		end
 		curl_cmd = curl_cmd .. " " .. process.quote(registry_url)
 		if not process.command_ok(curl_cmd) then ctx.fail("registry.runtime publish failed") end
+		print("Published runtime " .. package_name .. " " .. version)
 	end
 
 	print("Runtime registry descriptor ready: " .. descriptor_path)
@@ -521,7 +376,8 @@ registry.runtime = function(ctx, inputs, opts)
 		output_path = descriptor_path,
 		metadata = {
 			kind = "runtime",
-			name = name,
+			name = package_name,
+			runtime_name = name,
 			version = version,
 			artifacts = artifact_paths,
 			package_toml = descriptor_path,

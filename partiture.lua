@@ -20,7 +20,7 @@ return ballad.partiture(function(p)
 		name = project.registry_name or "moonstone/ballad",
 		version = project.version,
 		target = "any",
-		runtime = project.runtime or "luajit@2.1.0",
+		runtime = project.runtime_spec or "moonstone/luajit@2.1.0",
 		lua_abi = project.lua_abi or "5.1",
 		description = project.description,
 	})

@@ -4,17 +4,18 @@ Ballad exports Moonstone-managed Lua projects through a deterministic pipeline. 
 
 ## Usage
 
-Legacy export remains available:
+Ballad runs partitures. With no command, it defaults to `partiture.lua`:
 
 ```sh
 moon sync
-moon run export -- . dist/ballad
+moon exec ballad
 ```
 
-The vNext pipeline runs a partiture:
+You can also pass a partiture explicitly:
 
 ```sh
 moon exec ballad -- play partiture.lua
+moon exec ballad -- ./release.partiture.lua
 ```
 
 ## Partiture API
@@ -41,7 +42,7 @@ return ballad.partiture(function(p)
     name = project.registry_name or "moonstone/ballad",
     version = project.version,
     target = "any",
-    runtime = project.runtime,
+    runtime = project.runtime_spec,
     lua_abi = project.lua_abi,
   })
 

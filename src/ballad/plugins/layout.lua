@@ -66,6 +66,8 @@ return {
     local bin_name = opts.bin or opts.name or "app"
     local entry = opts.entry or "src/main.lua"
     local interpreter = opts.interpreter or "lua"
+    local runnable = opts.runnable
+    if runnable == nil then runnable = true end
     local files = {}
     local destinations = {}
     local function add_file(task)
@@ -105,17 +107,19 @@ return {
         end
       end
     end
-    local launcher_parts = {
-      "#!/usr/bin/env sh",
-      "set -eu",
-      'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"',
-      'LIBEXEC="$ROOT/' .. libexec_root .. '"',
-      'export LUA_PATH="$LIBEXEC/lua/?.lua;$LIBEXEC/lua/?/init.lua;$LIBEXEC/src/?.lua;$LIBEXEC/src/?/init.lua;${LUA_PATH:-};;"',
-      'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
-      'exec ' .. interpreter .. ' "$LIBEXEC/' .. entry .. '" "$@"',
-    }
-    local launcher = table.concat(launcher_parts, "\n") .. "\n"
-    add_file({ dest = "bin/" .. bin_name, content = launcher, kind = "generated", executable = true })
+    if runnable then
+      local launcher_parts = {
+        "#!/usr/bin/env sh",
+        "set -eu",
+        'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"',
+        'LIBEXEC="$ROOT/' .. libexec_root .. '"',
+        'export LUA_PATH="$LIBEXEC/lua/?.lua;$LIBEXEC/lua/?/init.lua;$LIBEXEC/src/?.lua;$LIBEXEC/src/?/init.lua;${LUA_PATH:-};;"',
+        'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
+        'exec ' .. interpreter .. ' "$LIBEXEC/' .. entry .. '" "$@"',
+      }
+      local launcher = table.concat(launcher_parts, "\n") .. "\n"
+      add_file({ dest = "bin/" .. bin_name, content = launcher, kind = "generated", executable = true })
+    end
     local assets = graph.AssetSet.new()
     for _, task in ipairs(files) do
       local asset = ctx.graph:add_asset({
@@ -136,7 +140,7 @@ return {
       metadata = {
         layout = "libexec",
         libexec_root = libexec_root,
-        bin_name = bin_name,
+        bin_name = runnable and bin_name or nil,
         entry = entry,
         dependencies = meta.dependencies,
       },

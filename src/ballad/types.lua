@@ -56,11 +56,25 @@
 ---@field name string Package name from `[package].name`.
 ---@field version string Package version from `[package].version`.
 ---@field root string|nil Project root path.
----@field runtime string Runtime spec, e.g. `lua@5.4` or `love@11.5`.
+---@field runtime MoonstoneRuntime|nil Hydrated active runtime metadata.
+---@field runtime_spec string|nil Runtime spec, e.g. `lua@5.4` or `love@11.5`.
 ---@field lua_abi BalladLuaAbi Active Lua ABI.
 ---@field registry_name string|nil Registry package name override.
 ---@field description string Project description.
 ---@field packages MoonstoneResolvedPackage[]|nil Runtime package records enriched by `ballad.plugins.input.moonstone`.
+
+---@class MoonstoneRuntime
+---@field id string Runtime spec, e.g. `lua@5.4.7`.
+---@field name string Runtime command/package name, e.g. `lua` or `luajit`.
+---@field version string Runtime version.
+---@field lua_abi BalladLuaAbi Active Lua ABI normalized for consumers.
+---@field target string|nil Runtime artifact target.
+---@field artifact_hash string|nil Runtime artifact hash.
+---@field artifact_path string|nil Absolute local store artifact path.
+---@field bin table<string,string>|nil Runtime binaries relative to artifact root, e.g. `files/bin/lua`.
+---@field lib table<string,string>|nil Runtime library paths relative to artifact root.
+---@field include string|nil Runtime include path relative to artifact root.
+---@field env table|nil Moonstone environment metadata.
 
 ---@class MoonstoneStoreWarning
 ---@field code string Machine-readable warning code.
@@ -279,6 +293,7 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field entry string|nil Entry script inside the app tree, defaults to `src/main.lua`.
 ---@field bin string|nil Launcher name under `bin/`, defaults to `name` or `app`.
 ---@field interpreter string|nil Interpreter used by launcher, defaults to `lua`.
+---@field runnable boolean|nil Whether to generate the layout launcher, defaults to true.
 
 ---@class LayoutFlatOptions
 ---@field name string|nil Package/app name.
@@ -293,7 +308,7 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@class LayoutPlugin: PluginProxy
 ---@field libexec fun(project: MoonstoneProject, opts: LayoutLibexecOptions): LayoutNode Build `libexec/<name>/` plus `bin/<bin>` launcher assets.
 ---@field flat fun(project: MoonstoneProject, opts: LayoutFlatOptions|nil): LayoutNode Build a root-relative Lua layout.
----@field love fun(project: MoonstoneProject, opts: LayoutLoveOptions|nil): LayoutNode Legacy LÖVE layout hook; prefer `ballad.plugins.love.layout`.
+---@field love fun(project: MoonstoneProject, opts: LayoutLoveOptions|nil): LayoutNode LÖVE layout hook; prefer `ballad.plugins.love.layout`.
 
 ---@class LoveLayoutOptions
 ---@field main string|nil Path to `main.lua`, defaults to `main.lua`.
@@ -368,13 +383,24 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field helptags fun(layout: LayoutNode, opts: NvimHelptagsOptions|nil): LayoutNode Generate or declare helptags for `doc/*.txt`.
 ---@field discover fun(layout: LayoutNode, opts: NvimDiscoverOptions|nil): LayoutNode Scan modules/requires and attach dependency metadata.
 
----@class RuntimeBundleOptions
----@field enabled boolean|nil Set false to skip bundling.
----@field include_runtime boolean|nil Set false to skip bundling.
----@field mode 'bundled'|'external'|nil `external` skips bundling.
+---@class RuntimeWrapOptions
+---@field mode 'ship'|'global'|'fallback'|'none'|nil Runtime strategy, defaults to `ship`.
+---@field source MoonstoneRuntime|nil Runtime metadata, defaults to `project.runtime` from `moonstone.project`.
+---@field command string|nil Global runtime command for `global`/`fallback`, defaults to runtime name or `lua`.
+---@field shim boolean|nil Whether to generate launcher scripts, defaults to true.
+---@field entry string|nil Entry path inside the output layout; defaults from layout metadata.
+---@field launcher string|nil Unix launcher path, defaults to `run`.
+---@field bin string|nil Alias for `launcher`.
+---@field runtime_bin string|nil Runtime binary relative to artifact root, defaults to `source.bin.lua` or `source.bin.luajit`.
+---@field lua_roots string[]|nil Lua module roots inside output layout.
+---@field cpath_roots string[]|nil Native module roots inside output layout.
+---@field windows boolean|nil Set false to skip `.bat` launcher generation.
+---@field enabled boolean|nil Legacy: false maps to `mode = "none"`.
+---@field include_runtime boolean|nil Legacy: false maps to `mode = "global"`.
 
 ---@class RuntimePlugin: PluginProxy
----@field bundle fun(input: NodeHandle, opts: RuntimeBundleOptions|nil): LayoutNode Add selected Moonstone runtime files to an asset set.
+---@field wrap fun(input: NodeHandle, opts: RuntimeWrapOptions|nil): LayoutNode Add runtime assets, launcher scripts, and runtime metadata to a layout.
+---@field bundle fun(input: NodeHandle, opts: RuntimeWrapOptions|nil): LayoutNode Compatibility alias for `wrap`.
 
 ---@class LuaCompileOptions
 ---@field enabled boolean|nil Reserved.

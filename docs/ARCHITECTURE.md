@@ -1,13 +1,14 @@
 # Ballad Architecture
 
-Ballad has a legacy exporter plus the vNext partiture pipeline. The vNext model is a DAG of first-class sources, transform plugins, and explicit sinks.
+Ballad is a partiture-only exporter. A partiture is a DAG of first-class sources, transform plugins, and explicit sinks.
 
 ```text
 src/main.lua
   -> ballad.cli
-  -> ballad.exporter
+  -> ballad.partiture
+  -> ballad.pipeline
   -> ballad.project
-  -> ballad.fs / ballad.path / ballad.lockfile / ballad.toml / ballad.json
+  -> ballad.fs / ballad.path / ballad.lockfile / ballad.toml
 ```
 
 ## Modules
@@ -15,17 +16,6 @@ src/main.lua
 ### `ballad.cli`
 
 Argument parsing and help output.
-
-### `ballad.exporter`
-
-Legacy export orchestration:
-
-1. load Moonstone project metadata
-2. reset the output directory
-3. copy project Lua files
-4. copy selected package Lua modules from `.moonstone/env`
-5. write `file-graph.json`
-6. write `run.lua` for the plain Lua layout
 
 ### `ballad.pipeline`
 
