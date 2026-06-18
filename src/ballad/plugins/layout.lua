@@ -27,11 +27,113 @@ local function export_filter(meta)
   end
 end
 
+local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
+  opts = opts or {}
+  local project_asset = inputs[1].assets[1]
+  if not project_asset or project_asset.kind ~= "project" then
+    ctx.fail("layout." .. method_name .. " requires a moonstone.project node as input")
+  end
+  local meta = project_asset.metadata
+  local should_export = export_filter(meta)
+  local libexec_root = "libexec/" .. (opts.name or "app")
+  local bin_name = opts.bin or opts.name or "app"
+  local entry = opts.entry or "src/main.lua"
+  local interpreter = opts.interpreter or "lua"
+  local runnable = opts.runnable
+  if runnable == nil then runnable = true end
+  local files = {}
+  local destinations = {}
+  local function add_file(task)
+    if destinations[task.dest] then
+      error("destination collision: " .. task.dest)
+    end
+    destinations[task.dest] = task.src or "generated"
+    table.insert(files, task)
+  end
+  for _, source in ipairs(fs.list_files(meta.root)) do
+    local relative = path.relative(source, meta.root)
+    if not (relative:match("^%.git/") or relative:match("^%.moonstone/") or relative:match("^%.ballad/") or relative:match("^dist/") or relative == "moonstone.lock") then
+      add_file({ src = source, dest = libexec_root .. "/" .. relative, kind = "project" })
+    end
+  end
+  local module_root = path.join(meta.root, ".moonstone/env/share/lua", path.abi_directory(meta.abi))
+  if fs.is_dir(module_root) then
+    for _, module_path in ipairs(fs.list_files(module_root)) do
+      if fs.is_lua(module_path) then
+        local relative = path.relative(module_path, module_root)
+        local source = fs.readlink(module_path)
+        if should_export(relative, source) then
+          add_file({ src = source, dest = libexec_root .. "/lua/" .. relative, kind = "package" })
+        end
+      end
+    end
+  end
+  local lib_module_root = path.join(meta.root, ".moonstone/env/lib/lua", path.abi_directory(meta.abi))
+  if fs.is_dir(lib_module_root) then
+    for _, module_path in ipairs(fs.list_files(lib_module_root)) do
+      if fs.is_binary_module(module_path) then
+        local relative = path.relative(module_path, lib_module_root)
+        local source = fs.readlink(module_path)
+        if should_export(relative, source) then
+          add_file({ src = source, dest = libexec_root .. "/lib/" .. relative, kind = "package" })
+        end
+      end
+    end
+  end
+  if runnable then
+    local launcher_parts = {
+      "#!/usr/bin/env sh",
+      "set -eu",
+      'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"',
+      'LIBEXEC="$ROOT/' .. libexec_root .. '"',
+      'export LUA_PATH="$LIBEXEC/lua/?.lua;$LIBEXEC/lua/?/init.lua;$LIBEXEC/src/?.lua;$LIBEXEC/src/?/init.lua;${LUA_PATH:-};;"',
+      'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
+      'exec ' .. interpreter .. ' "$LIBEXEC/' .. entry .. '" "$@"',
+    }
+    local launcher = table.concat(launcher_parts, "\n") .. "\n"
+    add_file({ dest = "bin/" .. bin_name, content = launcher, kind = "generated", executable = true })
+  end
+  local assets = graph.AssetSet.new()
+  for _, task in ipairs(files) do
+    local asset = ctx.graph:add_asset({
+      kind = task.kind,
+      source_path = task.src,
+      virtual_path = task.dest,
+      content = task.content,
+      generated = task.kind == "generated",
+      metadata = {
+        executable = task.executable == true,
+      },
+    })
+    assets:add(asset)
+  end
+  assets:add(ctx.graph:add_asset({
+    kind = "files",
+    virtual_path = layout_name .. "-root",
+    metadata = {
+      layout = layout_name,
+      libexec_root = libexec_root,
+      bin_name = runnable and bin_name or nil,
+      entry = entry,
+      kind = "bin",
+      dependencies = meta.dependencies,
+    },
+  }))
+  assets:add(inputs[1].assets[1])
+  return assets
+end
+
 return {
   name = "ballad.plugins.layout",
   version = "0.1.0",
   methods = {
     libexec = {
+      inputs = { "asset_set" },
+      outputs = { "asset_set" },
+      cacheable = false,
+      parallel_safe = true,
+    },
+    exec = {
       inputs = { "asset_set" },
       outputs = { "asset_set" },
       cacheable = false,
@@ -56,98 +158,17 @@ return {
   ---@param opts table
   ---@return AssetSet
   libexec = function(ctx, inputs, opts)
-    local project_asset = inputs[1].assets[1]
-    if not project_asset or project_asset.kind ~= "project" then
-      ctx.fail("layout.libexec requires a moonstone.project node as input")
-    end
-    local meta = project_asset.metadata
-    local should_export = export_filter(meta)
-    local libexec_root = "libexec/" .. (opts.name or "app")
-    local bin_name = opts.bin or opts.name or "app"
-    local entry = opts.entry or "src/main.lua"
-    local interpreter = opts.interpreter or "lua"
-    local runnable = opts.runnable
-    if runnable == nil then runnable = true end
-    local files = {}
-    local destinations = {}
-    local function add_file(task)
-      if destinations[task.dest] then
-        error("destination collision: " .. task.dest)
-      end
-      destinations[task.dest] = task.src or "generated"
-      table.insert(files, task)
-    end
-    for _, source in ipairs(fs.list_files(meta.root)) do
-      local relative = path.relative(source, meta.root)
-      if not (relative:match("^%.git/") or relative:match("^%.moonstone/") or relative:match("^%.ballad/") or relative:match("^dist/") or relative == "moonstone.lock") then
-        add_file({ src = source, dest = libexec_root .. "/" .. relative, kind = "project" })
-      end
-    end
-    local module_root = path.join(meta.root, ".moonstone/env/share/lua", path.abi_directory(meta.abi))
-    if fs.is_dir(module_root) then
-      for _, module_path in ipairs(fs.list_files(module_root)) do
-        if fs.is_lua(module_path) then
-          local relative = path.relative(module_path, module_root)
-          local source = fs.readlink(module_path)
-          if should_export(relative, source) then
-            add_file({ src = source, dest = libexec_root .. "/lua/" .. relative, kind = "package" })
-          end
-        end
-      end
-    end
-    local lib_module_root = path.join(meta.root, ".moonstone/env/lib/lua", path.abi_directory(meta.abi))
-    if fs.is_dir(lib_module_root) then
-      for _, module_path in ipairs(fs.list_files(lib_module_root)) do
-        if fs.is_binary_module(module_path) then
-          local relative = path.relative(module_path, lib_module_root)
-          local source = fs.readlink(module_path)
-          if should_export(relative, source) then
-            add_file({ src = source, dest = libexec_root .. "/lib/" .. relative, kind = "package" })
-          end
-        end
-      end
-    end
-    if runnable then
-      local launcher_parts = {
-        "#!/usr/bin/env sh",
-        "set -eu",
-        'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"',
-        'LIBEXEC="$ROOT/' .. libexec_root .. '"',
-        'export LUA_PATH="$LIBEXEC/lua/?.lua;$LIBEXEC/lua/?/init.lua;$LIBEXEC/src/?.lua;$LIBEXEC/src/?/init.lua;${LUA_PATH:-};;"',
-        'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
-        'exec ' .. interpreter .. ' "$LIBEXEC/' .. entry .. '" "$@"',
-      }
-      local launcher = table.concat(launcher_parts, "\n") .. "\n"
-      add_file({ dest = "bin/" .. bin_name, content = launcher, kind = "generated", executable = true })
-    end
-    local assets = graph.AssetSet.new()
-    for _, task in ipairs(files) do
-      local asset = ctx.graph:add_asset({
-        kind = task.kind,
-        source_path = task.src,
-        virtual_path = task.dest,
-        content = task.content,
-        generated = task.kind == "generated",
-        metadata = {
-          executable = task.executable == true,
-        },
-      })
-      assets:add(asset)
-    end
-    assets:add(ctx.graph:add_asset({
-      kind = "files",
-      virtual_path = "libexec-root",
-      metadata = {
-        layout = "libexec",
-        libexec_root = libexec_root,
-        bin_name = runnable and bin_name or nil,
-        entry = entry,
-        dependencies = meta.dependencies,
-      },
-    }))
-    -- Preserve the original project asset so downstream nodes can access project metadata
-    assets:add(inputs[1].assets[1])
-    return assets
+    return build_libexec_layout(ctx, inputs, opts, "libexec", "libexec")
+  end,
+
+  ---@param ctx PluginCtx
+  ---@param inputs AssetSet[]
+  ---@param opts table
+  ---@return AssetSet
+  exec = function(ctx, inputs, opts)
+    opts = opts or {}
+    if opts.runnable == nil then opts.runnable = true end
+    return build_libexec_layout(ctx, inputs, opts, "exec", "exec")
   end,
 
   ---@param ctx PluginCtx

@@ -15,6 +15,12 @@ registry.methods = {
 		cacheable = false,
 		parallel_safe = true,
 	},
+	source_package = {
+		inputs = { "asset_set" },
+		outputs = { "asset_set" },
+		cacheable = false,
+		parallel_safe = true,
+	},
 	runtime = {
 		inputs = {},
 		outputs = { "asset_set" },
@@ -36,6 +42,169 @@ local function normalize_runtime_spec(value)
 		return value.name .. "@" .. value.version
 	end
 	return nil
+end
+
+local function toml_quote(value)
+	return '"' .. tostring(value):gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
+end
+
+local function is_array(value)
+	if type(value) ~= "table" then return false end
+	local max = 0
+	local count = 0
+	for k, _ in pairs(value) do
+		if type(k) ~= "number" then return false end
+		if k > max then max = k end
+		count = count + 1
+	end
+	return count == max
+end
+
+local function toml_inline_value(value)
+	local value_type = type(value)
+	if value_type == "string" then return toml_quote(value) end
+	if value_type == "number" or value_type == "boolean" then return tostring(value) end
+	if value_type == "table" then
+		if is_array(value) then
+			local parts = {}
+			for _, item in ipairs(value) do
+				parts[#parts + 1] = toml_inline_value(item)
+			end
+			return "[ " .. table.concat(parts, ", ") .. " ]"
+		end
+		local parts = {}
+		local keys = {}
+		for k, _ in pairs(value) do keys[#keys + 1] = k end
+		table.sort(keys)
+		for _, key in ipairs(keys) do
+			parts[#parts + 1] = tostring(key) .. " = " .. toml_inline_value(value[key])
+		end
+		return "{ " .. table.concat(parts, ", ") .. " }"
+	end
+	return toml_quote(value)
+end
+
+local function append_toml_table(lines, header, values)
+	local scalar_keys = {}
+	local table_keys = {}
+	for k, v in pairs(values or {}) do
+		if type(v) == "table" and not is_array(v) then
+			table_keys[#table_keys + 1] = k
+		else
+			scalar_keys[#scalar_keys + 1] = k
+		end
+	end
+	table.sort(scalar_keys)
+	table.sort(table_keys)
+	table.insert(lines, header)
+	for _, key in ipairs(scalar_keys) do
+		table.insert(lines, tostring(key) .. " = " .. toml_inline_value(values[key]))
+	end
+	for _, key in ipairs(table_keys) do
+		table.insert(lines, "")
+		local inner = header:match("^%[(.*)%]$")
+		local child_header = inner and ("[" .. inner .. "." .. tostring(key) .. "]") or (header .. "." .. tostring(key))
+		append_toml_table(lines, child_header, values[key])
+	end
+end
+
+local function glob_to_pattern(glob)
+	local pattern = tostring(glob):gsub("([%^%$%(%)%%%.%[%]%+%-%?])", "%%%1")
+	pattern = pattern:gsub("%*%*", "\001")
+	pattern = pattern:gsub("%*", "[^/]*")
+	pattern = pattern:gsub("\001", ".*")
+	return "^" .. pattern .. "$"
+end
+
+local function glob_matches(value, glob)
+	return value:match(glob_to_pattern(glob)) ~= nil
+end
+
+local function matches_any(value, patterns)
+	for _, pattern in ipairs(patterns or {}) do
+		if glob_matches(value, pattern) then return true end
+	end
+	return false
+end
+
+local function selected_source_files(ctx, input_set, opts)
+	if type(opts.include) ~= "table" or #opts.include == 0 then
+		ctx.fail("registry.source_package requires opts.include with explicit source patterns")
+	end
+	local default_exclude = {
+		".moonstone/**",
+		".ballad/**",
+		"zig-cache/**",
+		"zig-out/**",
+		".git/**",
+	}
+	local excludes = {}
+	for _, pattern in ipairs(default_exclude) do excludes[#excludes + 1] = pattern end
+	for _, pattern in ipairs(opts.exclude or {}) do excludes[#excludes + 1] = pattern end
+
+	local root = opts.root
+	for _, asset in ipairs(input_set.assets or {}) do
+		if asset.kind == "project" and asset.metadata then
+			root = root or asset.metadata.root or asset.metadata.project_root or asset.source_path
+		end
+	end
+	root = root or "."
+
+	local files = {}
+	local seen = {}
+	local has_project = false
+	for _, asset in ipairs(input_set.assets or {}) do
+		if asset.kind == "project" then has_project = true end
+	end
+
+	if has_project or opts.root then
+		for _, source in ipairs(fs.list_files(root)) do
+			local rel = path.relative(source, root)
+			if matches_any(rel, opts.include) and not matches_any(rel, excludes) then
+				files[#files + 1] = { source_path = source, virtual_path = rel }
+			end
+		end
+	else
+		for _, asset in ipairs(input_set.assets or {}) do
+			local rel = asset.virtual_path or asset.source_path or asset.output_path
+			if rel and matches_any(rel, opts.include) and not matches_any(rel, excludes) and not seen[rel] then
+				seen[rel] = true
+				files[#files + 1] = asset
+			end
+		end
+	end
+	table.sort(files, function(a, b) return (a.virtual_path or a.source_path or a.id) < (b.virtual_path or b.source_path or b.id) end)
+	if #files == 0 then ctx.fail("registry.source_package selected no files") end
+	return files
+end
+
+local function copy_source_files(files, staging_dir)
+	fs.remove_tree(staging_dir)
+	fs.mkdir(staging_dir)
+	for _, asset in ipairs(files) do
+		local rel = asset.virtual_path or asset.source_path or asset.output_path or asset.id
+		local dest = path.join(staging_dir, rel)
+		if asset.generated and asset.content then
+			fs.mkdir(path.dirname(dest))
+			fs.write_file(dest, asset.content)
+		elseif asset.source_path then
+			fs.copy_file(asset.source_path, dest)
+		elseif asset.output_path then
+			fs.copy_file(asset.output_path, dest)
+		end
+		if asset.metadata and asset.metadata.executable then
+			fs.chmod(dest, "+x")
+		end
+	end
+end
+
+local function write_tar_file_list(files, staging_dir, list_path)
+	local lines = {}
+	for _, asset in ipairs(files) do
+		local rel = asset.virtual_path or asset.source_path or asset.output_path or asset.id
+		lines[#lines + 1] = "./" .. rel
+	end
+	fs.write_file(list_path, table.concat(lines, "\n") .. "\n")
 end
 
 registry.package = function(ctx, inputs, opts)
@@ -237,6 +406,143 @@ registry.package = function(ctx, inputs, opts)
 		metadata = {
 			tarball = tarball_path,
 			package_toml = path.join(artifact_dir, "package.toml"),
+			publish_sh = publish_path,
+		},
+	}))
+	return assets
+end
+
+registry.source_package = function(ctx, inputs, opts)
+	opts = opts or {}
+	local input_set = inputs[1]
+	if not input_set or not input_set.assets then
+		ctx.fail("registry.source_package requires a moonstone.project or asset set input")
+	end
+	if not opts.name or opts.name == "" then ctx.fail("registry.source_package requires opts.name") end
+	if not opts.version or opts.version == "" then ctx.fail("registry.source_package requires opts.version") end
+	if type(opts.materialize) ~= "table" then ctx.fail("registry.source_package requires opts.materialize") end
+
+	if not process.command_ok("command -v zstd >/dev/null 2>&1") then
+		ctx.fail("registry.source_package requires zstd in PATH to create .tar.zst source archives")
+	end
+
+	local package_name = opts.name
+	local version = opts.version
+	local package_kind = opts.kind or "lib"
+	local local_name = package_name:match("/([^/]+)$") or package_name
+	local explicit_out = opts.out ~= nil
+	local out_dir = opts.out or path.join(".ballad/tmp/registry-source-package-" .. tostring(ctx.node.id), "registry-artifact")
+	local work_dir = explicit_out
+		and path.join(path.dirname(out_dir), ".registry-source-work-" .. tostring(ctx.node.id))
+		or path.join(path.dirname(out_dir), "source-work")
+	local staging_dir = path.join(work_dir, "payload")
+	local list_path = path.join(work_dir, "sources.list")
+	local uncompressed_tar_path = path.join(work_dir, "source.tar")
+	local tarball_name = local_name .. "-" .. version .. "-source.tar.zst"
+	local tarball_path = path.join(out_dir, tarball_name)
+
+	local files = selected_source_files(ctx, input_set, opts)
+	if explicit_out then
+		fs.remove_tree(out_dir)
+		fs.remove_tree(work_dir)
+	else
+		fs.remove_tree(path.dirname(out_dir))
+	end
+	fs.mkdir(out_dir)
+	copy_source_files(files, staging_dir)
+	write_tar_file_list(files, staging_dir, list_path)
+
+	print("Creating source registry artifact: " .. tarball_name)
+	local tar_cmd = string.format(
+		"tar -cf %s -C %s -T %s",
+		process.quote(path.absolute(uncompressed_tar_path)),
+		process.quote(path.absolute(staging_dir)),
+		process.quote(path.absolute(list_path))
+	)
+	if not process.command_ok(tar_cmd) then
+		ctx.fail("registry.source_package failed to create intermediate source tar")
+	end
+	local zstd_cmd = string.format(
+		"zstd -q -T0 -19 -f -o %s %s",
+		process.quote(path.absolute(tarball_path)),
+		process.quote(path.absolute(uncompressed_tar_path))
+	)
+	if not process.command_ok(zstd_cmd) then
+		ctx.fail("registry.source_package failed to create " .. tarball_name)
+	end
+
+	local blob_hash = "b3:" .. process.b3sum(tarball_path)
+	local blob_bytes = 0
+	local handle = io.open(tarball_path, "rb")
+	if handle then
+		blob_bytes = handle:seek("end") or 0
+		handle:close()
+	end
+	local recipe_text = table.concat({
+		"schema=moonstone.recipe.v0",
+		"kind=source-artifact",
+		"name=" .. package_name,
+		"version=" .. version,
+		"materializer=" .. tostring(opts.materialize.type or "command"),
+		"target=source",
+		"hash=" .. blob_hash,
+		"",
+	}, "\n")
+	local recipe_hash = "b3:" .. process.b3sum_string(recipe_text)
+	local digest = blob_hash:sub(4)
+	local url = string.format("blobs/b3/%s/%s/%s.tar.zst", digest:sub(1, 2), digest:sub(3, 4), digest)
+
+	local package_lines = {
+		"[package]",
+		"name = " .. toml_quote(package_name),
+		"version = " .. toml_quote(version),
+		"kind = " .. toml_quote(package_kind),
+		"description = " .. toml_quote(opts.description or ("Source package for " .. package_name)),
+		"",
+		"[[artifacts]]",
+		'id = "source"',
+		'kind = "source"',
+		'target = "source"',
+		'format = "tar.zst"',
+		'url = "' .. url .. '"',
+		'hash = "' .. blob_hash .. '"',
+		'recipe_hash = "' .. recipe_hash .. '"',
+		"bytes = " .. tostring(blob_bytes),
+		"",
+	}
+	local materialize = {}
+	for key, value in pairs(opts.materialize) do
+		materialize[key] = value
+	end
+	materialize.type = materialize.type or "command"
+	append_toml_table(package_lines, "[artifacts.materialize]", materialize)
+	fs.write_file(path.join(out_dir, "package.toml"), table.concat(package_lines, "\n") .. "\n")
+
+	local publish_lines = {
+		"#!/usr/bin/env sh",
+		"set -eu",
+		': "${MOONSTONE_TOKEN:=${MOONSTONE_PUBLISH_TOKEN:-}}"',
+		': "${MOONSTONE_TOKEN:?Set MOONSTONE_TOKEN or MOONSTONE_PUBLISH_TOKEN}"',
+		'curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$(dirname "$0")/package.toml" -F blob=@"$(dirname "$0")/'
+			.. tarball_name
+			.. '" "${MOONSTONE_PUBLISH_URL:-https://moonstone.sh/api/registry/v0/publish}"',
+	}
+	local publish_path = path.join(out_dir, "publish.sh")
+	fs.write_file(publish_path, table.concat(publish_lines, "\n") .. "\n")
+	fs.chmod(publish_path, "+x")
+
+	print("Source registry artifact ready in " .. out_dir)
+	local assets = graph.AssetSet.new()
+	assets:add(ctx.graph:add_asset({
+		kind = "registry",
+		virtual_path = out_dir,
+		output_path = out_dir,
+		metadata = {
+			kind = "source",
+			name = package_name,
+			version = version,
+			tarball = tarball_path,
+			package_toml = path.join(out_dir, "package.toml"),
 			publish_sh = publish_path,
 		},
 	}))

@@ -295,6 +295,8 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field interpreter string|nil Interpreter used by launcher, defaults to `lua`.
 ---@field runnable boolean|nil Whether to generate the layout launcher, defaults to true.
 
+---@class LayoutExecOptions: LayoutLibexecOptions
+
 ---@class LayoutFlatOptions
 ---@field name string|nil Package/app name.
 ---@field entry string|nil Entry script, defaults to `src/main.lua`.
@@ -307,6 +309,7 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 
 ---@class LayoutPlugin: PluginProxy
 ---@field libexec fun(project: MoonstoneProject, opts: LayoutLibexecOptions): LayoutNode Build `libexec/<name>/` plus `bin/<bin>` launcher assets.
+---@field exec fun(project: MoonstoneProject, opts: LayoutExecOptions): LayoutNode Build a ready-to-run executable app layout backed by `libexec/<name>/`.
 ---@field flat fun(project: MoonstoneProject, opts: LayoutFlatOptions|nil): LayoutNode Build a root-relative Lua layout.
 ---@field love fun(project: MoonstoneProject, opts: LayoutLoveOptions|nil): LayoutNode LÖVE layout hook; prefer `ballad.plugins.love.layout`.
 

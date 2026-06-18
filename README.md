@@ -61,6 +61,24 @@ Core namespaces:
 - `p.sink.file_graph(input, opts)` writes file graph JSON.
 - `p.sink.artifact(input, opts)` writes a single artifact output.
 
+## Executable App Layout
+
+Use `layout.exec` for a distributable app directory with a launcher under `bin/` and project/runtime files under `libexec/`:
+
+```lua
+local project = moonstone.project({ root = "." })
+local app = layout.exec(project, {
+  name = "meteorite",
+  entry = "src/main.lua",
+  bin = "meteorite",
+  interpreter = "lua",
+})
+
+p.sink.directory(app, { out = "dist/meteorite", file_graph = true })
+```
+
+For Lua+Zig projects, run the Zig build as a native task before the sink or registry artifact so compiled Lua C modules exist in `.moonstone/env/lib/lua/<abi>/` and are copied into `libexec/<name>/lib/`.
+
 ## LÖVE Example
 
 ```lua
@@ -93,3 +111,34 @@ Build an upload-ready production bundle for `@moonstone/ballad`:
 ```sh
 ./release-tools/build-registry-artifact.py
 ```
+
+## Source-Built Registry Package
+
+Use `registry.source_package` when a Moonstone package should publish source and let Moonstone materialize it with a build command:
+
+```lua
+local project = moonstone.project({ root = "." })
+local source_artifact = registry.source_package(project, {
+  name = "user/meteorite",
+  version = project.version,
+  kind = "lib",
+  include = { "moonstone.toml", "build.zig", "src/**", "native/**", "README.md" },
+  exclude = { ".moonstone/**", ".ballad/**", "zig-cache/**", "zig-out/**", ".git/**" },
+  materialize = {
+    type = "command",
+    command = "zig build install-native",
+    collect = {
+      lua_modules = {
+        { name = "meteorite.lua", path = "src/app.lua" },
+      },
+      lua_cmodules = {
+        { name = "meteorite_native.so", path = ".moonstone/env/lib/lua/${lua_abi}/meteorite_native.so" },
+      },
+    },
+  },
+})
+
+p.sink.artifact(source_artifact, { out = "dist/registry/meteorite" })
+```
+
+The source archive is emitted as `name-version-source.tar.zst`; `zstd` must be available in `PATH`.
