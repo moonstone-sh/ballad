@@ -5,8 +5,8 @@
 ---@field include? string[] glob patterns for files to include
 ---@field exclude? string[] glob patterns for files to exclude
 ---@field out? string output directory (default "dist/nvim-plugin")
----@field runtime? string e.g. "nvim@0.10"
----@field lua_api? string e.g. "nvim-0.10"
+---@field runtime? string e.g. "nvim@0.12.2"
+---@field lua_api? string e.g. "5.1"
 ---@field lua_abi? string e.g. "lua-5.1"
 ---@field dependencies? table<string, DependencySpec> declared dependency map
 ---@field unresolved? string behavior for unknown requires: "warn" or "fail" (default "warn")
@@ -25,6 +25,69 @@ local fs = require("ballad.fs")
 local path = require("ballad.path")
 local process = require("ballad.process")
 local deps = require("ballad.deps")
+
+local known_externs = {
+  plenary = { role = "peer", package = "nvim-lua/plenary.nvim", constraint = "*" },
+  telescope = { role = "optional", package = "nvim-telescope/telescope.nvim", constraint = "*", optional = true },
+  ["nvim-treesitter"] = { role = "optional", package = "nvim-treesitter/nvim-treesitter", constraint = "*", optional = true },
+  cmp = { role = "optional", package = "hrsh7th/nvim-cmp", constraint = "*", optional = true },
+  luasnip = { role = "optional", package = "L3MON4D3/LuaSnip", constraint = "*", optional = true },
+  lspconfig = { role = "optional", package = "neovim/nvim-lspconfig", constraint = "*", optional = true },
+  treesitter = { role = "optional", package = "nvim-treesitter/nvim-treesitter", constraint = "*", optional = true },
+}
+
+local known_require_roots = {
+  plenary = "plenary",
+  telescope = "telescope",
+  ["nvim-treesitter"] = "nvim-treesitter",
+  cmp = "cmp",
+  luasnip = "luasnip",
+  lspconfig = "lspconfig",
+  treesitter = "treesitter",
+}
+
+local function clone_spec(spec)
+  local result = {}
+  for key, value in pairs(spec or {}) do
+    result[key] = value
+  end
+  return result
+end
+
+local function normalize_extern_spec(name, spec)
+  if spec == true or spec == nil then
+    local known = known_externs[name]
+    if known then return clone_spec(known) end
+    return { role = "peer", package = name, constraint = "*" }
+  end
+  if type(spec) == "string" then
+    return { role = "peer", package = spec, constraint = "*" }
+  end
+  if type(spec) == "table" then
+    local result = clone_spec(spec)
+    if result.optional and not result.role then result.role = "optional" end
+    result.role = result.role or "peer"
+    result.constraint = result.constraint or "*"
+    if not result.package then
+      local known = known_externs[name]
+      result.package = known and known.package or name
+    end
+    return result
+  end
+  return { role = "peer", package = tostring(spec), constraint = "*" }
+end
+
+local function suggest_extern(mod)
+  for root, name in pairs(known_require_roots) do
+    if mod == root or mod:sub(1, #root + 1) == root .. "." then
+      local spec = known_externs[name]
+      if spec then
+        return name, spec
+      end
+    end
+  end
+  return nil, nil
+end
 
 ---Convert a glob pattern to a Lua pattern.
 ---@param glob string
@@ -76,7 +139,7 @@ local function validate_nvim_structure(root, module, ctx)
   end
 end
 
-return {
+local nvim_plugin = {
   name = "ballad.plugins.nvim",
   version = "0.1.0",
 
@@ -215,6 +278,7 @@ return {
     local dev_deps = {}
     local tool_deps = {}
     local helper_deps = {}
+    local suggested_deps = {}
 
     for rel, required_mods in pairs(require_map) do
       for _, mod in ipairs(required_mods) do
@@ -263,7 +327,11 @@ return {
             end
           end
         elseif role == "unknown" then
-          table.insert(unknown_requires, { file = rel, module = mod })
+          local suggested_name, suggested_spec = suggest_extern(mod)
+          if suggested_name and suggested_spec then
+            suggested_deps[suggested_name] = suggested_spec
+          end
+          table.insert(unknown_requires, { file = rel, module = mod, suggested_name = suggested_name, suggested_spec = suggested_spec })
         end
 
         ::skip_builtin::
@@ -275,11 +343,15 @@ return {
       local unresolved = opts.unresolved or "warn"
       local messages = {}
       for _, item in ipairs(unknown_requires) do
-        table.insert(messages, "  " .. item.file .. ": require('" .. item.module .. "')")
+        local message = "  " .. item.file .. ": require('" .. item.module .. "')"
+        if item.suggested_name and item.suggested_spec then
+          message = message .. "\n    suggested dependency: " .. item.suggested_name .. " = { role = \"" .. (item.suggested_spec.role or "peer") .. "\", package = \"" .. item.suggested_spec.package .. "\" }"
+        end
+        table.insert(messages, message)
       end
       if unresolved == "fail" then
         ctx.fail("nvim.layout: unresolved require(s) found:\n" .. table.concat(messages, "\n") ..
-          "\n\nDeclare them in opts.dependencies or set opts.unresolved = 'warn'.")
+          "\n\nDeclare them with nvim.extern({...}), pass opts.dependencies, or set opts.unresolved = 'warn'.")
       else
         ctx.warn("nvim.layout: unresolved require(s) found:\n" .. table.concat(messages, "\n"))
       end
@@ -298,9 +370,9 @@ return {
         kind = "lib",
         artifact_kind = "lua_module",
         module = opts.module,
-        runtime = opts.runtime or "nvim@0.10",
-        lua_api = opts.lua_api or "nvim-0.10",
-        lua_abi = opts.lua_abi or "lua-5.1",
+        runtime = opts.runtime or "nvim@0.12.2",
+        lua_api = opts.lua_api or "5.1",
+        lua_abi = opts.lua_abi or "5.1",
         dependencies = {
           peer = peer_deps,
           optional = optional_deps,
@@ -310,6 +382,7 @@ return {
           helper = helper_deps,
         },
         classified_requires = classified,
+        suggested_dependencies = suggested_deps,
       },
     }))
 
@@ -404,3 +477,22 @@ return {
     return assets
   end,
 }
+
+---Build a Neovim external dependency map for nvim.layout.
+---Values may be package strings, dependency spec tables, or true to use built-in suggestions.
+---@param specs table<string, string|DependencySpec|boolean>|string[]
+---@return table<string, DependencySpec>
+function nvim_plugin.extern(specs)
+  local result = {}
+  for key, value in pairs(specs or {}) do
+    if type(key) == "number" then
+      local name = tostring(value)
+      result[name] = normalize_extern_spec(name, true)
+    else
+      result[key] = normalize_extern_spec(key, value)
+    end
+  end
+  return result
+end
+
+return nvim_plugin
