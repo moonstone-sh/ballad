@@ -68,6 +68,16 @@ local function query_current_runtime(root, moon_bin)
   return decoded
 end
 
+local function query_runtime_artifact(moon_bin, artifact_hash)
+  if not artifact_hash or artifact_hash == "" then return nil end
+  local cmd = process.quote(moon_bin or "moon") .. " store query --by-artifact-hash " .. process.quote(artifact_hash) .. " --json"
+  local output = process.capture(cmd)
+  if output == "" then return nil end
+  local decoded = dkjson.decode(output)
+  if type(decoded) ~= "table" or type(decoded[1]) ~= "table" then return nil end
+  return decoded[1]
+end
+
 local function hydrate_runtime(loaded, opts)
   opts = opts or {}
   local env_rt = loaded.env and loaded.env.runtime or {}
@@ -75,6 +85,8 @@ local function hydrate_runtime(loaded, opts)
   local version = env_rt.version or "5.1"
   local dep = runtime_from_dependencies(loaded.root, env_rt) or {}
   local query = query_current_runtime(loaded.root, opts.moon or opts.moon_bin or "moon") or {}
+  local artifact_hash = dep.artifact_hash or query.artifact_hash
+  local store_query = query_runtime_artifact(opts.moon or opts.moon_bin or "moon", artifact_hash) or {}
   local artifact_path = dep.path or query.path
   local files_root = artifact_path and path.join(artifact_path, "files") or nil
   local bin = files_root and runtime_bin_map(files_root) or {}
@@ -85,8 +97,15 @@ local function hydrate_runtime(loaded, opts)
     version = version,
     lua_abi = normalize_abi(env_rt.abi or dep.lua_abi or query.lua_abi),
     target = dep.target or query.target,
-    artifact_hash = dep.artifact_hash or query.artifact_hash,
-    artifact_path = artifact_path,
+    artifact_hash = artifact_hash,
+    artifact_path = artifact_path or store_query.artifact_path,
+    manifest_path = store_query.manifest_path,
+    source_payload = dep.source_payload or query.source_payload or store_query.source_payload,
+    source_payload_path = dep.source_payload_path or query.source_payload_path or store_query.source_payload_path,
+    source_kind = dep.source_kind or query.source_kind or store_query.source_kind,
+    source_hash = dep.source_hash or query.source_hash or store_query.source_hash,
+    store_query = store_query,
+    store_warnings = store_query.warnings or {},
     bin = bin,
     lib = { lua = "files/lib" },
     include = "files/include",
@@ -134,6 +153,7 @@ return {
       name = name,
       version = version,
       description = description,
+      root = loaded.root,
       runtime = runtime_record,
       runtime_spec = runtime,
       lua_abi = lua_abi,

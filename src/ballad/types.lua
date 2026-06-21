@@ -71,6 +71,11 @@
 ---@field target string|nil Runtime artifact target.
 ---@field artifact_hash string|nil Runtime artifact hash.
 ---@field artifact_path string|nil Absolute local store artifact path.
+---@field manifest_path string|nil Store manifest path for the runtime artifact.
+---@field source_payload string|nil Runtime source payload path relative to the artifact root.
+---@field source_payload_path string|nil Absolute runtime source payload path in the local store.
+---@field source_kind string|nil Runtime source payload kind.
+---@field source_hash string|nil Runtime source hash when available.
 ---@field bin table<string,string>|nil Runtime binaries relative to artifact root, e.g. `files/bin/lua`.
 ---@field lib table<string,string>|nil Runtime library paths relative to artifact root.
 ---@field include string|nil Runtime include path relative to artifact root.
