@@ -270,6 +270,21 @@ registry.package = function(ctx, inputs, opts)
 	end
 	local bin_name = meta.bin_name or meta.name or "app"
 	local libexec_root = meta.libexec_root or ""
+	-- Resolve README content: explicit opts.readme_content, else read opts.readme / project readme.
+	local readme_content = opts.readme_content
+	if not readme_content then
+		local project_asset = nil
+		for _, a in ipairs(inputs[1].assets or {}) do
+			if a.kind == "project" then project_asset = a break end
+		end
+		local project_root = (project_asset and project_asset.metadata and project_asset.metadata.root) or "."
+		local readme_rel = opts.readme or (project_asset and project_asset.metadata and project_asset.metadata.readme) or nil
+		if readme_rel and readme_rel ~= "" then
+			local candidate = path.join(project_root, readme_rel)
+			local content = fs.read_file(candidate)
+			if content then readme_content = content end
+		end
+	end
 	local entry_prefix = libexec_root ~= "" and libexec_root .. "/" or ""
 	local provides_list = {}
 	if target == "any" then
@@ -349,8 +364,11 @@ registry.package = function(ctx, inputs, opts)
 		'version = "' .. version .. '"',
 		'kind = "' .. (opts.kind or meta.kind or "bin") .. '"',
 		'description = "Exported ' .. pkg_name .. ' package"',
-		"",
 	}
+	if readme_content then
+		table.insert(package_lines, "readme = " .. toml_quote(readme_content))
+	end
+	table.insert(package_lines, "")
 	if dependency_section ~= "" then
 		table.insert(package_lines, dependency_section)
 		table.insert(package_lines, "")
@@ -385,13 +403,18 @@ registry.package = function(ctx, inputs, opts)
 	end
 	local package_toml = table.concat(package_lines, "\n") .. "\n"
 	fs.write_file(path.join(artifact_dir, "package.toml"), package_toml)
+	local readme_field = ""
+	if readme_content then
+		fs.write_file(path.join(artifact_dir, "README.md"), readme_content)
+		readme_field = ' -F readme=@"$(dirname "$0")/README.md"'
+	end
 	local publish_lines = {
 		"#!/usr/bin/env sh",
 		"set -eu",
 		': "${MOONSTONE_TOKEN:?Set MOONSTONE_TOKEN to a write:registry API token}"',
-		'curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$(dirname "$0")/package.toml" -F blob=@"$(dirname "$0")/'
+		'curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$(dirname "$0")/package.toml"' .. readme_field .. ' -F blob=@"$(dirname "$0")/'
 			.. tarball_name
-			.. '" "${MOONSTONE_PUBLISH_URL:-https://moonstone.sh/api/registry/v0/publish}"',
+			.. '" "${MOONSTONE_PUBLISH_URL:-https://registry.moonstone.sh/api/registry/v0/publish}"',
 	}
 	local publish_sh = table.concat(publish_lines, "\n") .. "\n"
 	local publish_path = path.join(artifact_dir, "publish.sh")
@@ -407,6 +430,7 @@ registry.package = function(ctx, inputs, opts)
 			tarball = tarball_path,
 			package_toml = path.join(artifact_dir, "package.toml"),
 			publish_sh = publish_path,
+			readme = readme_content and path.join(artifact_dir, "README.md") or nil,
 		},
 	}))
 	return assets
@@ -492,12 +516,28 @@ registry.source_package = function(ctx, inputs, opts)
 	local digest = blob_hash:sub(4)
 	local url = string.format("blobs/b3/%s/%s/%s.tar.zst", digest:sub(1, 2), digest:sub(3, 4), digest)
 
+	-- Optional README: opts.readme_content, else read opts.readme from the project root.
+	local readme_content = opts.readme_content
+	if not readme_content and opts.readme and opts.readme ~= "" then
+		local project_asset = nil
+		for _, a in ipairs((inputs[1] and inputs[1].assets) or {}) do
+			if a.kind == "project" then project_asset = a break end
+		end
+		local project_root = (project_asset and project_asset.metadata and project_asset.metadata.root) or "."
+		local content = fs.read_file(path.join(project_root, opts.readme))
+		if content then readme_content = content end
+	end
 	local package_lines = {
 		"[package]",
 		"name = " .. toml_quote(package_name),
 		"version = " .. toml_quote(version),
 		"kind = " .. toml_quote(package_kind),
 		"description = " .. toml_quote(opts.description or ("Source package for " .. package_name)),
+	}
+	if readme_content then
+		table.insert(package_lines, "readme = " .. toml_quote(readme_content))
+	end
+	for _, line in ipairs({
 		"",
 		"[[artifacts]]",
 		'id = "source"',
@@ -509,7 +549,9 @@ registry.source_package = function(ctx, inputs, opts)
 		'recipe_hash = "' .. recipe_hash .. '"',
 		"bytes = " .. tostring(blob_bytes),
 		"",
-	}
+	}) do
+		table.insert(package_lines, line)
+	end
 	local materialize = {}
 	for key, value in pairs(opts.materialize) do
 		materialize[key] = value
@@ -517,15 +559,20 @@ registry.source_package = function(ctx, inputs, opts)
 	materialize.type = materialize.type or "command"
 	append_toml_table(package_lines, "[artifacts.materialize]", materialize)
 	fs.write_file(path.join(out_dir, "package.toml"), table.concat(package_lines, "\n") .. "\n")
+	local readme_field = ""
+	if readme_content then
+		fs.write_file(path.join(out_dir, "README.md"), readme_content)
+		readme_field = ' -F readme=@"$(dirname "$0")/README.md"'
+	end
 
 	local publish_lines = {
 		"#!/usr/bin/env sh",
 		"set -eu",
 		': "${MOONSTONE_TOKEN:=${MOONSTONE_PUBLISH_TOKEN:-}}"',
 		': "${MOONSTONE_TOKEN:?Set MOONSTONE_TOKEN or MOONSTONE_PUBLISH_TOKEN}"',
-		'curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$(dirname "$0")/package.toml" -F blob=@"$(dirname "$0")/'
+		'curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$(dirname "$0")/package.toml"' .. readme_field .. ' -F blob=@"$(dirname "$0")/'
 			.. tarball_name
-			.. '" "${MOONSTONE_PUBLISH_URL:-https://moonstone.sh/api/registry/v0/publish}"',
+			.. '" "${MOONSTONE_PUBLISH_URL:-https://registry.moonstone.sh/api/registry/v0/publish}"',
 	}
 	local publish_path = path.join(out_dir, "publish.sh")
 	fs.write_file(publish_path, table.concat(publish_lines, "\n") .. "\n")
@@ -571,6 +618,26 @@ local function artifact_target_from_path(artifact, name, version)
 	return base:sub(#prefix + 1, #base - #".tar.zst")
 end
 
+local function file_size(file_path)
+	local handle = io.open(file_path, "rb")
+	if not handle then return 0 end
+	local bytes = handle:seek("end") or 0
+	handle:close()
+	return bytes
+end
+
+local function existing_file(file_path)
+	local handle = io.open(file_path, "rb")
+	if not handle then return nil end
+	handle:close()
+	return file_path
+end
+
+local function default_runtime_source_archive(name, version, artifacts_dir)
+	return existing_file(path.join(artifacts_dir, "src", name .. "-" .. version .. ".tar.gz"))
+		or existing_file(path.join(path.dirname(artifacts_dir), "src", name .. "-" .. version .. ".tar.gz"))
+end
+
 registry.runtime = function(ctx, inputs, opts)
 	local name = opts.name or os.getenv("RUNTIME_NAME") or "lua"
 	local package_name = opts.package_name or os.getenv("RUNTIME_PACKAGE_NAME") or name
@@ -578,26 +645,44 @@ registry.runtime = function(ctx, inputs, opts)
 	if not version or version == "" then ctx.fail("registry.runtime requires opts.version or RUNTIME_VERSION") end
 	local artifacts_dir = opts.artifacts_dir or os.getenv("RUNTIME_ARTIFACTS_DIR") or "scripts/runtime/artifacts"
 	local out_dir = opts.out or os.getenv("RUNTIME_REGISTRY_OUT") or artifacts_dir
-	local registry_url = opts.registry_url or os.getenv("MOONSTONE_PUBLISH_URL") or "https://moonstone.sh/api/registry/v0/publish"
+	local registry_url = opts.registry_url or os.getenv("MOONSTONE_PUBLISH_URL") or "https://registry.moonstone.sh/api/registry/v0/publish"
 	local token = opts.token or os.getenv("MOONSTONE_PUBLISH_TOKEN") or os.getenv("MOONSTONE_TOKEN") or ""
 	local publish_now = opts.publish == true or opts.publish == "true" or os.getenv("RUNTIME_PUBLISH") == "1"
 	local lua_abi = infer_runtime_lua_abi(name, version, opts.lua_abi or os.getenv("RUNTIME_LUA_ABI"))
 	local lua_api = opts.lua_api or os.getenv("RUNTIME_LUA_API") or lua_abi
 	local bins = runtime_bin_provides(name, opts)
+	local source_archive = opts.source_archive or opts.source or os.getenv("RUNTIME_SOURCE_ARCHIVE") or default_runtime_source_archive(name, version, artifacts_dir)
+	local source_kind = opts.source_kind or os.getenv("RUNTIME_SOURCE_KIND") or (name == "lua" and "puc_lua_source" or (name == "luajit" and "luajit_source" or "runtime_source"))
+	local source_format = opts.source_format or os.getenv("RUNTIME_SOURCE_FORMAT") or "tar.gz"
+	local source_hash = nil
+	local source_url = nil
+	if source_archive and source_archive ~= "" then
+		if not existing_file(source_archive) then ctx.fail("registry.runtime source archive not found: " .. tostring(source_archive)) end
+		source_hash = "b3:" .. process.b3sum(source_archive)
+		source_url = "https://registry.moonstone.sh/registry/v0/blobs/placeholder/" .. source_hash
+	end
 
 	fs.mkdir(out_dir)
 	local descriptor_stem = package_name:gsub("/", "-")
 	local descriptor_path = path.join(out_dir, descriptor_stem .. "-" .. version .. "-package.toml")
 	local publish_path = path.join(out_dir, "publish-" .. descriptor_stem .. "-" .. version .. ".sh")
 	local artifact_paths = {}
+	local readme_content = opts.readme_content
+	if not readme_content and opts.readme and opts.readme ~= "" then
+		local content = fs.read_file(opts.readme)
+		if content then readme_content = content end
+	end
 	local package_lines = {
 		"[package]",
 		'name = "' .. package_name .. '"',
 		'version = "' .. version .. '"',
 		'kind = "runtime"',
 		'description = "' .. (opts.description or (name .. " runtime packaged for Moonstone")) .. '"',
-		"",
 	}
+	if readme_content then
+		table.insert(package_lines, "readme = " .. toml_quote(readme_content))
+	end
+	table.insert(package_lines, "")
 
 	local find_cmd = "find " .. process.quote(artifacts_dir) .. " -maxdepth 1 -type f -name " .. process.quote(name .. "-" .. version .. "-*.tar.zst") .. " | sort"
 	local pipe = assert(io.popen(find_cmd, "r"))
@@ -608,9 +693,7 @@ registry.runtime = function(ctx, inputs, opts)
 			if blob_hash then blob_hash = blob_hash:match("^%s*(.-)%s*$") end
 			if not blob_hash or blob_hash == "" then blob_hash = "b3:" .. process.b3sum(artifact) end
 			local recipe_hash = "b3:" .. process.b3sum_string("recipe-" .. name .. "-" .. version .. "-" .. target)
-			local handle = io.open(artifact, "rb")
-			local bytes = 0
-			if handle then bytes = handle:seek("end") or 0; handle:close() end
+			local bytes = file_size(artifact)
 			table.insert(artifact_paths, artifact)
 			table.insert(package_lines, "[[artifacts]]")
 			table.insert(package_lines, 'kind = "runtime"')
@@ -618,8 +701,14 @@ registry.runtime = function(ctx, inputs, opts)
 			table.insert(package_lines, 'lua_api = "' .. lua_api .. '"')
 			table.insert(package_lines, 'lua_abi = "' .. lua_abi .. '"')
 			table.insert(package_lines, 'format = "tar.zst"')
-			table.insert(package_lines, 'url = "https://moonstone.sh/registry/v0/blobs/placeholder/' .. blob_hash .. '"')
+			table.insert(package_lines, 'url = "https://registry.moonstone.sh/registry/v0/blobs/placeholder/' .. blob_hash .. '"')
 			table.insert(package_lines, 'hash = "' .. blob_hash .. '"')
+			if source_hash and source_url then
+				table.insert(package_lines, 'source_hash = "' .. source_hash .. '"')
+				table.insert(package_lines, 'source_url = "' .. source_url .. '"')
+				table.insert(package_lines, 'source_kind = "' .. source_kind .. '"')
+				table.insert(package_lines, 'source_format = "' .. source_format .. '"')
+			end
 			table.insert(package_lines, 'bytes = ' .. tostring(bytes))
 			table.insert(package_lines, 'recipe_hash = "' .. recipe_hash .. '"')
 			table.insert(package_lines, "")
@@ -648,6 +737,11 @@ registry.runtime = function(ctx, inputs, opts)
 	end
 
 	fs.write_file(descriptor_path, table.concat(package_lines, "\n") .. "\n")
+	local readme_field = ""
+	if readme_content then
+		fs.write_file(path.join(out_dir, "README.md"), readme_content)
+		readme_field = ' -F readme=@"' .. path.join(out_dir, "README.md") .. '"'
+	end
 	local publish_lines = {
 		"#!/usr/bin/env sh",
 		"set -eu",
@@ -657,6 +751,12 @@ registry.runtime = function(ctx, inputs, opts)
 	}
 	for _, artifact in ipairs(artifact_paths) do
 		table.insert(publish_lines, "  -F blob=@\"" .. artifact .. "\" \\")
+	end
+	if readme_field ~= "" then
+		table.insert(publish_lines, "  " .. readme_field:sub(2) .. " \\")
+	end
+	if source_archive and source_archive ~= "" then
+		table.insert(publish_lines, "  -F blob=@\"" .. source_archive .. "\" \\")
 	end
 	table.insert(publish_lines, '  "${MOONSTONE_PUBLISH_URL:-' .. registry_url .. '}"')
 	fs.write_file(publish_path, table.concat(publish_lines, "\n") .. "\n")
@@ -668,6 +768,9 @@ registry.runtime = function(ctx, inputs, opts)
 		local curl_cmd = "curl --fail-with-body -H " .. process.quote("Authorization: Bearer " .. token) .. " -F descriptor=@" .. process.quote(descriptor_path)
 		for _, artifact in ipairs(artifact_paths) do
 			curl_cmd = curl_cmd .. " -F blob=@" .. process.quote(artifact)
+		end
+		if source_archive and source_archive ~= "" then
+			curl_cmd = curl_cmd .. " -F blob=@" .. process.quote(source_archive)
 		end
 		curl_cmd = curl_cmd .. " " .. process.quote(registry_url)
 		if not process.command_ok(curl_cmd) then ctx.fail("registry.runtime publish failed") end
@@ -688,6 +791,7 @@ registry.runtime = function(ctx, inputs, opts)
 			artifacts = artifact_paths,
 			package_toml = descriptor_path,
 			publish_sh = publish_path,
+			readme = readme_content and path.join(out_dir, "README.md") or nil,
 		},
 	}))
 	return assets

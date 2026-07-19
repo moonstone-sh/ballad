@@ -149,6 +149,20 @@ return {
       roles = opts.roles or { "runtime" },
       moon = opts.moon or opts.moon_bin or "moon",
     })
+    -- Resolve an optional README path (e.g. readme = "./README.md").
+    local readme_path = nil
+    local readme_content = nil
+    local declared_readme = pkg.readme
+    if declared_readme and declared_readme ~= "" then
+      local candidate = path.join(loaded.root, declared_readme)
+      if fs.read_file(candidate) then
+        readme_path = declared_readme
+        readme_content = fs.read_file(candidate)
+      end
+    elseif fs.read_file(path.join(loaded.root, "README.md")) then
+      readme_path = "README.md"
+      readme_content = fs.read_file(path.join(loaded.root, "README.md"))
+    end
     return {
       name = name,
       version = version,
@@ -158,6 +172,8 @@ return {
       runtime_spec = runtime,
       lua_abi = lua_abi,
       registry_name = pkg.registry_name or nil,
+      readme = readme_path,
+      readme_content = readme_content,
       packages = packages,
     }
   end,
@@ -169,6 +185,7 @@ return {
   project = function(ctx, inputs, opts)
     local root = opts.root or "."
     local loaded = project_mod.load(root)
+    local pkg = loaded.manifest and loaded.manifest.package or {}
 
     -- Build role-grouped dependency map from flat or role-table manifest.dependencies
     local dep_roles = { dev = {}, tool = {}, runtime = {}, helper = {}, peer = {}, optional = {} }
@@ -223,6 +240,8 @@ return {
         env = loaded.env,
         abi = loaded.env and loaded.env.runtime and loaded.env.runtime.abi or "5.1",
         dependencies = dep_roles,
+        readme = (pkg.readme and pkg.readme ~= "") and pkg.readme
+          or (fs.read_file(path.join(loaded.root, "README.md")) and "README.md" or nil),
       },
     })
     assets:add(asset)
