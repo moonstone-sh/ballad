@@ -1,3 +1,37 @@
+---@meta
+
+---@class RegistryPackageOpts
+---@field name? string package name (e.g. "moonstone/ballad" or "user/app")
+---@field version? string package version string (e.g. "0.1.0")
+---@field kind? string package kind: "bin", "lib", "script", "runtime" (default from layout or "bin")
+---@field target? string target platform or "any" (default "any")
+---@field runtime? string runtime dependency constraint (e.g. "moonstone/luajit@2.1.0")
+---@field lua_abi? string target Lua ABI (e.g. "5.1" or "lua-5.1")
+---@field readme? string relative path to README file (defaults to auto-detecting README.md in project root)
+---@field readme_content? string raw README markdown content string
+---@field out? string output directory path for the registry artifact
+
+---@class RegistrySourcePackageOpts
+---@field name? string package name (e.g. "user/meteorite")
+---@field version? string package version string (e.g. "0.1.0")
+---@field kind? string package kind: "lib", "bin", "script" (default "lib")
+---@field description? string package description
+---@field include? string[] list of glob patterns for files to include in the source archive
+---@field exclude? string[] list of glob patterns for files to exclude from the source archive
+---@field readme? string relative path to README file (defaults to auto-detecting README.md in project root)
+---@field readme_content? string raw README markdown content string
+---@field materialize? table materialization recipe spec (type = "command", command = "...", collect = {...})
+---@field out? string output directory path for the registry artifact
+
+---@class RegistryExternalPackageOpts
+---@field name? string package name (e.g. "moonstone/lua")
+---@field version? string package version string (e.g. "5.4.7")
+---@field target? string target platform (e.g. "macos-aarch64")
+---@field description? string package description
+---@field readme? string path to README file (defaults to auto-detecting README.md in project root)
+---@field readme_content? string raw README markdown content string
+---@field out? string output directory path for the registry artifact
+
 local registry = {}
 
 local graph = require("ballad.graph")
@@ -239,6 +273,11 @@ local function write_tar_file_list(files, staging_dir, list_path)
 	fs.write_file(list_path, table.concat(lines, "\n") .. "\n")
 end
 
+---Package a layout AssetSet into a publishable prebuilt registry artifact.
+---@param ctx PluginCtx
+---@param inputs AssetSet[] layout asset set input
+---@param opts RegistryPackageOpts|table options specifying name, version, target, runtime, readme, readme_content, etc.
+---@return AssetSet
 registry.package = function(ctx, inputs, opts)
 	local files_asset = nil
 	for _, a in ipairs(inputs[1].assets) do
@@ -454,6 +493,11 @@ registry.package = function(ctx, inputs, opts)
 	return assets
 end
 
+---Package a Moonstone project into a publishable source archive artifact.
+---@param ctx PluginCtx
+---@param inputs AssetSet[] moonstone.project asset set input
+---@param opts RegistrySourcePackageOpts|table options specifying name, version, include, exclude, readme, readme_content, materialize, etc.
+---@return AssetSet
 registry.source_package = function(ctx, inputs, opts)
 	opts = opts or {}
 	local input_set = inputs[1]
