@@ -1,8 +1,24 @@
+---@meta
+
+---@class NativeRunResult
+---@field ok boolean whether execution succeeded (exit code 0 and all outputs present)
+---@field tool string executable tool name or path
+---@field resolved_tool string resolved absolute path to executable tool
+---@field description string description of the task
+---@field exit_code integer process exit code
+---@field stdout string captured stdout text
+---@field stderr string captured stderr text
+---@field missing_outputs string[] list of declared outputs missing after execution
+---@field missing_tool? boolean set if tool was not found in PATH
+
 local native_runner = {}
 local process = require("ballad.process")
 local path = require("ballad.path")
 local fs = require("ballad.fs")
 
+---Resolve a tool name to an executable path.
+---@param tool string tool name or path
+---@return string|nil resolved path or nil if not found
 function native_runner.find_tool(tool)
   if path.is_absolute(tool) then
     return tool
@@ -18,12 +34,11 @@ function native_runner.find_tool(tool)
 end
 
 function native_runner.run(opts)
-  local tool = opts.tool
-  local args = opts.args
-  local outputs = opts.outputs
-  if not tool then error("native_task: missing tool") end
-  if not args then error("native_task: missing args") end
-  if not outputs or #outputs == 0 then error("native_task: missing outputs") end
+  local tool = opts.tool or (opts.cmd and opts.cmd:match("^%S+"))
+  local args = opts.args or {}
+  local cmd_opt = opts.cmd
+  local outputs = opts.outputs or {}
+  if not tool then error("native_task: missing tool or cmd") end
 
   local tool_path = native_runner.find_tool(tool)
   if not tool_path then
@@ -31,7 +46,7 @@ function native_runner.run(opts)
       ok = false,
       missing_tool = true,
       tool = tool,
-      description = opts.description or "native task",
+      description = opts.description or cmd_opt or "native task",
       exit_code = -1,
       stdout = "",
       stderr = "",
@@ -40,13 +55,23 @@ function native_runner.run(opts)
   end
 
   local cwd = opts.cwd or "."
-  local description = opts.description or "native task"
+  local description = opts.description or cmd_opt or (tool .. " " .. table.concat(args, " "))
 
-  local cmd_parts = {process.quote(tool_path)}
-  for _, arg in ipairs(args) do
-    table.insert(cmd_parts, process.quote(arg))
+  local cmd
+  if cmd_opt then
+    local first_token = cmd_opt:match("^%S+")
+    if first_token and (first_token == tool or first_token == process.quote(tool) or first_token == tool_path or first_token == process.quote(tool_path)) then
+      cmd = process.quote(tool_path) .. cmd_opt:sub(#first_token + 1)
+    else
+      cmd = process.quote(tool_path) .. " " .. cmd_opt
+    end
+  else
+    local cmd_parts = {process.quote(tool_path)}
+    for _, arg in ipairs(args) do
+      table.insert(cmd_parts, process.quote(arg))
+    end
+    cmd = table.concat(cmd_parts, " ")
   end
-  local cmd = table.concat(cmd_parts, " ")
 
   if not fs.is_dir(cwd) then
     fs.mkdir(cwd)
@@ -106,16 +131,30 @@ function native_runner.run(opts)
 end
 
 function native_runner.spawn_background(opts, stdout_file, stderr_file, exit_file)
-  local tool_path = native_runner.find_tool(opts.tool)
+  local tool = opts.tool or (opts.cmd and opts.cmd:match("^%S+"))
+  if not tool then
+    return nil, "missing tool or cmd"
+  end
+  local tool_path = native_runner.find_tool(tool)
   if not tool_path then
-    return nil, "tool not found: " .. opts.tool
+    return nil, "tool not found: " .. tool
   end
 
-  local cmd_parts = {process.quote(tool_path)}
-  for _, arg in ipairs(opts.args) do
-    table.insert(cmd_parts, process.quote(arg))
+  local cmd
+  if opts.cmd then
+    local first_token = opts.cmd:match("^%S+")
+    if first_token and (first_token == tool or first_token == process.quote(tool) or first_token == tool_path or first_token == process.quote(tool_path)) then
+      cmd = process.quote(tool_path) .. opts.cmd:sub(#first_token + 1)
+    else
+      cmd = process.quote(tool_path) .. " " .. opts.cmd
+    end
+  else
+    local cmd_parts = {process.quote(tool_path)}
+    for _, arg in ipairs(opts.args or {}) do
+      table.insert(cmd_parts, process.quote(arg))
+    end
+    cmd = table.concat(cmd_parts, " ")
   end
-  local cmd = table.concat(cmd_parts, " ")
 
   local env_prefix = ""
   for k, v in pairs(opts.env or {}) do

@@ -48,6 +48,9 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
   for method_name, method_contract in pairs(contract.methods or {}) do
     self[method_name] = function(...)
       local args = {...}
+      if args[1] == self then
+        table.remove(args, 1)
+      end
       local inputs = {}
       local options = {}
       local first = args[1]
@@ -55,8 +58,17 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
         table.insert(inputs, first._id)
         table.remove(args, 1)
       end
-      if #args >= 1 and type(args[1]) == "table" then
-        options = args[1]
+      if #args >= 1 then
+        if type(args[1]) == "table" and getmetatable(args[1]) ~= NodeHandle then
+          options = args[1]
+        elseif type(args[1]) == "string" then
+          options[1] = args[1]
+          if type(args[2]) == "table" then
+            for k, v in pairs(args[2]) do
+              options[k] = v
+            end
+          end
+        end
       end
       local node = graph:add_node({
         plugin = name,
@@ -158,6 +170,19 @@ function PipelineContext.new(graph, host, jobs)
   end
   self.sink.artifact = function(input, opts)
     return self:_core_node("ballad.core.sink", "artifact", { input }, opts or {})
+  end
+  ---Terminal sink for tasks that do not produce output directories or artifacts.
+  ---Accepts 0, 1, or 2 arguments: p.sink.none(), p.sink.none(input), p.sink.none(opts), or p.sink.none(input, opts).
+  ---@param input? NodeHandle|table optional pipeline node handle or options table
+  ---@param opts? table optional sink options
+  ---@return NodeHandle
+  self.sink.none = function(input, opts)
+    if type(input) == "table" and getmetatable(input) ~= NodeHandle then
+      opts = input
+      input = nil
+    end
+    local inputs = input and { input } or {}
+    return self:_core_node("ballad.core.sink", "none", inputs, opts or {})
   end
   return self
 end
@@ -319,21 +344,33 @@ local function resolve_tool(tool)
   return nil
 end
 
----@param opts table
----@return AssetSet
----@param opts table
----@return AssetSet
+---@class NativeTaskOpts
+---@field tool? string executable tool name or path (e.g. "zip", "moonc", "gcc")
+---@field cmd? string raw multi-segment command string (e.g. "moon run build" or "moonc -t dist src/")
+---@field args? string[] arguments list (when cmd is not used)
+---@field inputs? string[]|AssetSet[] input files, directory paths, glob patterns (e.g. "src/*.moon"), or asset sets to track for cache invalidation
+---@field outputs? string[] output file or directory paths produced by the task
+---@field cwd? string working directory for process execution (defaults to ".")
+---@field env? table<string, string> environment variables for process execution
+---@field cacheable? boolean whether task output can be cached (defaults to true)
+---@field parallel_safe? boolean whether task can run in parallel with non-overlapping tasks (defaults to true)
+---@field description? string human-readable description for progress reports and events
+
+---Execute a native tool or command line subprocess.
+---@param opts NativeTaskOpts options table defining tool/cmd, args, inputs, outputs, cwd, env, and caching
+---@return AssetSet asset set representing produced outputs
 function PipelineContext:native_task(opts)
   opts = opts or {}
-  local tool = opts.tool or error("native_task: missing required field 'tool'")
+  local tool = opts.tool or (opts.cmd and opts.cmd:match("^%S+")) or error("native_task: missing required field 'tool' or 'cmd'")
   local args = opts.args or {}
-  local outputs = opts.outputs or error("native_task: missing required field 'outputs'")
+  local cmd_opt = opts.cmd
+  local outputs = opts.outputs or {}
   local inputs = opts.inputs or {}
   local cwd = opts.cwd or "."
   local env = opts.env or {}
   local cacheable = opts.cacheable ~= false
   local parallel_safe = opts.parallel_safe ~= false
-  local description = opts.description or (tool .. " " .. table.concat(args, " "))
+  local description = opts.description or cmd_opt or (tool .. " " .. table.concat(args, " "))
 
   local cache = require("ballad.cache")
   local cache_key = nil
@@ -377,11 +414,21 @@ function PipelineContext:native_task(opts)
   end
 
   -- Build command
-  local cmd_parts = { resolved_tool }
-  for _, a in ipairs(args) do
-    table.insert(cmd_parts, require("ballad.process").quote(a))
+  local cmd
+  if cmd_opt then
+    local first_token = cmd_opt:match("^%S+")
+    if first_token and (first_token == tool or first_token == require("ballad.process").quote(tool) or first_token == resolved_tool or first_token == require("ballad.process").quote(resolved_tool)) then
+      cmd = require("ballad.process").quote(resolved_tool) .. cmd_opt:sub(#first_token + 1)
+    else
+      cmd = require("ballad.process").quote(resolved_tool) .. " " .. cmd_opt
+    end
+  else
+    local cmd_parts = { resolved_tool }
+    for _, a in ipairs(args) do
+      table.insert(cmd_parts, require("ballad.process").quote(a))
+    end
+    cmd = table.concat(cmd_parts, " ")
   end
-  local cmd = table.concat(cmd_parts, " ")
 
   -- Build env prefix if needed
   local env_prefix = ""
@@ -541,8 +588,8 @@ function PipelineContext:_native_task_deferred(opts, cache_key)
   local fs = require("ballad.fs")
   local dkjson = require("dkjson")
 
-  local tool = opts.tool
-  local outputs = opts.outputs
+  local tool = opts.tool or (opts.cmd and opts.cmd:match("^%S+")) or error("native_task: missing tool or cmd")
+  local outputs = opts.outputs or {}
   local inputs = opts.inputs or {}
 
   for _, pending in ipairs(self._pending_tasks) do
@@ -566,6 +613,7 @@ function PipelineContext:_native_task_deferred(opts, cache_key)
   local stdout_file = os.tmpname()
   local stderr_file = os.tmpname()
   local exit_file = os.tmpname()
+  os.remove(exit_file)
 
   local cwd = opts.cwd or "."
   if not fs.is_dir(cwd) then
@@ -939,6 +987,12 @@ local function core_handler(plugin, method)
         end
         local result = graph_mod.AssetSet.new()
         result:add(ctx.graph:add_asset({ kind = "sink", virtual_path = out, output_path = out, generated = true, metadata = { kind = "artifact", source = source } }))
+        return result
+      end
+    elseif method == "none" then
+      return function(ctx, input_results, opts)
+        local result = graph_mod.AssetSet.new()
+        result:add(ctx.graph:add_asset({ kind = "sink", virtual_path = "none", metadata = { kind = "none" } }))
         return result
       end
     end

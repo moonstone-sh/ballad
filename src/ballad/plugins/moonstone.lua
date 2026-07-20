@@ -1,3 +1,30 @@
+---@meta
+
+---@class MoonstoneProjectOpts
+---@field root? string root directory of the Moonstone project (default ".")
+---@field roles? string[] dependency roles to enrich (default {"runtime"})
+---@field moon? string path or name of Moonstone binary (default "moon")
+
+---@class MoonstoneRunOpts
+---@field script? string named script from moonstone.toml to run
+---@field inputs? string[]|AssetSet[] list of input file paths, globs (e.g. "src/*.moon"), or asset sets to track for cache invalidation
+---@field outputs? string[] list of output file/directory paths expected to be produced
+---@field cwd? string working directory (defaults to ".")
+---@field env? table<string, string> environment variables to set during execution
+---@field description? string human-readable description for diagnostics and graph visualization
+---@field parallel_safe? boolean whether this task can run concurrently with non-overlapping tasks (default true)
+---@field cacheable? boolean whether native task caching is enabled (default true)
+
+---@class MoonstoneExecOpts
+---@field cmd? string|string[] command string or array of arguments to execute inside moon exec
+---@field inputs? string[]|AssetSet[] list of input file paths, globs (e.g. "src/*.moon"), or asset sets to track for cache invalidation
+---@field outputs? string[] list of output file/directory paths expected to be produced
+---@field cwd? string working directory (defaults to ".")
+---@field env? table<string, string> environment variables to set during execution
+---@field description? string human-readable description for diagnostics and graph visualization
+---@field parallel_safe? boolean whether this task can run concurrently with non-overlapping tasks (default true)
+---@field cacheable? boolean whether native task caching is enabled (default true)
+
 local graph = require("ballad.graph")
 local project_mod = require("ballad.project")
 local moonstone_input = require("ballad.plugins.input.moonstone")
@@ -113,12 +140,51 @@ local function hydrate_runtime(loaded, opts)
   }
 end
 
+local function find_moon_cli(opts)
+  opts = opts or {}
+  if opts.moon or opts.moon_bin then
+    return opts.moon or opts.moon_bin
+  end
+  if os.getenv("MOONSTONE_CLI") and os.getenv("MOONSTONE_CLI") ~= "" then
+    return os.getenv("MOONSTONE_CLI")
+  end
+  if os.getenv("MOONSTONE_BIN") and os.getenv("MOONSTONE_BIN") ~= "" then
+    return os.getenv("MOONSTONE_BIN")
+  end
+
+  local pipe = io.popen("which -a moon 2>/dev/null")
+  if pipe then
+    for line in pipe:lines() do
+      local trimmed = line:match("^%s*(.-)%s*$")
+      if trimmed ~= "" and not trimmed:find("%.moonstone/env/bin") and not trimmed:find("moonscript") then
+        pipe:close()
+        return trimmed
+      end
+    end
+    pipe:close()
+  end
+
+  return "moon"
+end
+
 return {
   name = "ballad.plugins.moonstone",
   version = "0.1.0",
   methods = {
     project = {
       inputs = {},
+      outputs = { "asset_set" },
+      cacheable = false,
+      parallel_safe = true,
+    },
+    run = {
+      inputs = { "asset_set" },
+      outputs = { "asset_set" },
+      cacheable = false,
+      parallel_safe = true,
+    },
+    exec = {
+      inputs = { "asset_set" },
       outputs = { "asset_set" },
       cacheable = false,
       parallel_safe = true,
@@ -187,9 +253,22 @@ return {
     local loaded = project_mod.load(root)
     local pkg = loaded.manifest and loaded.manifest.package or {}
 
-    -- Build role-grouped dependency map from flat or role-table manifest.dependencies
+    -- Build role-grouped dependency map from flat, role-table, or [[dependencies]] array manifest.dependencies
     local dep_roles = { dev = {}, tool = {}, runtime = {}, helper = {}, peer = {}, optional = {} }
-    if loaded.manifest and loaded.manifest.dependencies then
+    local manifest_content = fs.read_file(path.join(loaded.root, "moonstone.toml")) or ""
+    local parsed_deps = parse_dependencies_toml(manifest_content)
+    if #parsed_deps > 0 then
+      for _, dep in ipairs(parsed_deps) do
+        local role = dep.role or "runtime"
+        if dep_roles[role] then
+          dep_roles[role][dep.name] = {
+            constraint = dep.constraint or "*",
+            resolver = dep.resolver or nil,
+            optional = (role == "optional") or (dep.optional == "true"),
+          }
+        end
+      end
+    elseif loaded.manifest and loaded.manifest.dependencies then
       if #loaded.manifest.dependencies > 0 then
         for _, dep in ipairs(loaded.manifest.dependencies) do
           local role = dep.role or "runtime"
@@ -246,5 +325,83 @@ return {
     })
     assets:add(asset)
     return assets
+  end,
+
+  ---Run a named script from moonstone.toml inside the Moonstone project environment.
+  ---
+  ---Example usage in `partiture.lua`:
+  ---```lua
+  ---  -- Run `moon run build` when any file in src/*.moon changes, emitting dist/src/main.lua
+  ---  moonstone:run("build", {
+  ---    inputs = { "src/*.moon" },
+  ---    outputs = { "dist/src/main.lua" },
+  ---  })
+  ---```
+  ---@param ctx PluginCtx
+  ---@param inputs AssetSet[]
+  ---@param opts MoonstoneRunOpts|string|table script name or options table (with optional inputs, outputs, cwd, env)
+  ---@return AssetSet
+  run = function(ctx, inputs, opts)
+    opts = opts or {}
+    local script = opts.script or opts[1] or error("moonstone.run: missing script name")
+    local moon_bin = find_moon_cli(opts)
+    local cmd = process.quote(moon_bin) .. " run " .. script
+    local task_opts = {
+      id = opts.id or ("moonstone.run:" .. script),
+      cmd = cmd,
+      tool = moon_bin,
+      inputs = opts.inputs or {},
+      outputs = opts.outputs or {},
+      cwd = opts.cwd or opts.root or ".",
+      env = opts.env,
+      cacheable = opts.cacheable ~= false,
+      parallel_safe = opts.parallel_safe ~= false,
+      description = opts.description or ("moon run " .. script),
+    }
+    return ctx:native_task(task_opts)
+  end,
+
+  ---Execute an arbitrary command inside the project environment via `moon exec`.
+  ---
+  ---Example usage in `partiture.lua`:
+  ---```lua
+  ---  -- Run `moonc -t dist src/` when src/*.moon changes
+  ---  moonstone:exec("moonc -t dist src/", {
+  ---    inputs = { "src/*.moon" },
+  ---    outputs = { "dist/src/main.lua" },
+  ---  })
+  ---```
+  ---@param ctx PluginCtx
+  ---@param inputs AssetSet[]
+  ---@param opts MoonstoneExecOpts|string|table|string[] command string, array of args, or options table (with optional inputs, outputs, cwd, env)
+  ---@return AssetSet
+  exec = function(ctx, inputs, opts)
+    opts = opts or {}
+    local cmd_or_args = opts.cmd or opts.args or opts[1] or error("moonstone.exec: missing command")
+    local moon_bin = find_moon_cli(opts)
+    local command_str
+    if type(cmd_or_args) == "table" then
+      local parts = {}
+      for _, p in ipairs(cmd_or_args) do
+        table.insert(parts, process.quote(p))
+      end
+      command_str = table.concat(parts, " ")
+    else
+      command_str = tostring(cmd_or_args)
+    end
+    local cmd = process.quote(moon_bin) .. " exec " .. command_str
+    local task_opts = {
+      id = opts.id or "moonstone.exec",
+      cmd = cmd,
+      tool = moon_bin,
+      inputs = opts.inputs or {},
+      outputs = opts.outputs or {},
+      cwd = opts.cwd or opts.root or ".",
+      env = opts.env,
+      cacheable = opts.cacheable ~= false,
+      parallel_safe = opts.parallel_safe ~= false,
+      description = opts.description or ("moon exec " .. command_str),
+    }
+    return ctx:native_task(task_opts)
   end,
 }

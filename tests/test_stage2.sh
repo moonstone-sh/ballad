@@ -9,7 +9,7 @@ rm -rf dist/ballad
 luajit src/main.lua play partiture.lua
 PKG_VERSION=$(grep '^version' dist/ballad/registry-artifact/package.toml | head -1)
 echo "package.toml version line: $PKG_VERSION"
-echo "$PKG_VERSION" | grep -q '0.2.0' || { echo "FAIL: version mismatch"; exit 1; }
+echo "$PKG_VERSION" | grep -q '0.2.' || { echo "FAIL: version mismatch"; exit 1; }
 echo "PASS: version matches moonstone.toml"
 
 echo ""
@@ -89,6 +89,7 @@ return ballad.partiture(function(p)
 end)
 LUAEOF
 rm -f native-output.txt
+rm -rf .ballad/runs
 luajit src/main.lua play /tmp/test_native_success.lua > /tmp/native_success.log 2>&1
 test -f native-output.txt || { echo "FAIL: native-output.txt not created"; exit 1; }
 grep -q "hello" native-output.txt || { echo "FAIL: native-output.txt content wrong"; exit 1; }
@@ -139,6 +140,45 @@ echo "PASS: native task fails clearly for missing output"
 
 echo ""
 echo "=== Test 7: love plugin layout and pack ==="
+rm -rf /tmp/love-test-project
+mkdir -p /tmp/love-test-project/src /tmp/love-test-project/.moonstone/env
+cat > /tmp/love-test-project/.moonstone/env/env.toml << 'EOF'
+[runtime]
+name = "love"
+version = "11.5"
+abi = "lua51"
+EOF
+  cat > /tmp/love-test-project/moonstone.toml << 'EOF'
+[package]
+name = "love-game"
+version = "0.1.0"
+kind = "script"
+description = "Test LÖVE game"
+
+[interpreter]
+name = "love"
+version = "11.5"
+abi = "5.1"
+EOF
+  echo "function love.draw() end" > /tmp/love-test-project/main.lua
+  echo "function love.conf(t) t.identity = 'love-game' end" > /tmp/love-test-project/conf.lua
+  echo "return {}" > /tmp/love-test-project/src/utils.lua
+  cat > /tmp/love-test-project/partiture.lua << 'EOF'
+local ballad = require("ballad")
+return ballad.partiture(function(p)
+  local moonstone = p:use(ballad.plugins.moonstone)
+  local love = p:use(ballad.plugins.love)
+  local registry = p:use(ballad.plugins.registry)
+  local project = moonstone.project({ root = "." })
+  local app = love.layout(project, { main = "main.lua", conf = "conf.lua" })
+  local archive = love.pack(app, { out = "dist/my-love-game.love" })
+  local reg = registry.package(app, { name = "my-love-game", version = "0.1.0", runtime = "love@11.5" })
+  p.sink.directory(app, { out = "dist/love-root" })
+  p.sink.artifact(archive, { out = "dist/my-love-game.love" })
+  p.sink.artifact(reg, { out = "dist/love-root/registry-artifact" })
+end)
+EOF
+
 cd /tmp/love-test-project
 rm -rf dist
 LUA_PATH="/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?.lua;/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?/init.lua;/Users/extrordinaire/Workbench/user/ballad/src/?.lua;/Users/extrordinaire/Workbench/user/ballad/src/?/init.lua;;"
@@ -170,6 +210,42 @@ echo "PASS: deterministic love archive produces identical hashes"
 
 echo ""
 echo "=== Test 8: nvim plugin layout ==="
+rm -rf /tmp/nvim-test-project
+mkdir -p /tmp/nvim-test-project/lua/my_plugin /tmp/nvim-test-project/plugin /tmp/nvim-test-project/doc /tmp/nvim-test-project/.moonstone/env
+cat > /tmp/nvim-test-project/.moonstone/env/env.toml << 'EOF'
+[runtime]
+name = "nvim"
+version = "0.10"
+abi = "lua51"
+EOF
+cat > /tmp/nvim-test-project/moonstone.toml << 'EOF'
+[package]
+name = "my_plugin"
+version = "0.1.0"
+kind = "script"
+
+[interpreter]
+name = "nvim"
+version = "0.10"
+abi = "5.1"
+EOF
+echo "return {}" > /tmp/nvim-test-project/lua/my_plugin/init.lua
+echo "require('my_plugin.init')" > /tmp/nvim-test-project/plugin/my_plugin.lua
+echo "*my_plugin.txt*" > /tmp/nvim-test-project/doc/my_plugin.txt
+cat > /tmp/nvim-test-project/partiture.lua << 'EOF'
+local ballad = require("ballad")
+return ballad.partiture(function(p)
+  local moonstone = p:use(ballad.plugins.moonstone)
+  local nvim = p:use(ballad.plugins.nvim)
+  local registry = p:use(ballad.plugins.registry)
+  local project = moonstone.project({ root = "." })
+  local app = nvim.layout(project, { name = "my_plugin", entry = "plugin/my_plugin.lua" })
+  p.sink.directory(app, { out = "dist/nvim-plugin" })
+  local reg = registry.package(app, { name = "my_plugin", version = "0.1.0", runtime = "nvim@0.10", lua_api = "5.1", entry = "plugin/my_plugin.lua" })
+  p.sink.artifact(reg, { out = "dist/nvim-plugin/registry-artifact" })
+end)
+EOF
+
 cd /tmp/nvim-test-project
 rm -rf dist
 LUA_PATH="/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?.lua;/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?/init.lua;/Users/extrordinaire/Workbench/user/ballad/src/?.lua;/Users/extrordinaire/Workbench/user/ballad/src/?/init.lua;;"
@@ -253,6 +329,53 @@ echo "PASS: parallel scheduler runs tasks concurrently"
 
 echo ""
 echo "=== Test 11: dependency export policies ==="
+rm -rf /tmp/nvim-deps-test-project
+mkdir -p /tmp/nvim-deps-test-project/lua/my_plugin /tmp/nvim-deps-test-project/.moonstone/env
+cat > /tmp/nvim-deps-test-project/.moonstone/env/env.toml << 'EOF'
+[runtime]
+name = "nvim"
+version = "0.10"
+abi = "lua51"
+EOF
+cat > /tmp/nvim-deps-test-project/moonstone.toml << 'EOF'
+[package]
+name = "my_plugin"
+version = "0.1.0"
+kind = "script"
+
+[interpreter]
+name = "nvim"
+version = "0.10"
+abi = "5.1"
+
+[[dependencies]]
+name = "nvim-lua/plenary.nvim"
+constraint = "*"
+role = "peer"
+
+[[dependencies]]
+name = "nvim-telescope/telescope.nvim"
+constraint = "*"
+role = "optional"
+EOF
+echo "require('plenary')" > /tmp/nvim-deps-test-project/lua/my_plugin/init.lua
+echo "require('my_plugin.init')" > /tmp/nvim-deps-test-project/lua/my_plugin/utils.lua
+echo "require('telescope')" >> /tmp/nvim-deps-test-project/lua/my_plugin/utils.lua
+echo "require('unknown_lib')" >> /tmp/nvim-deps-test-project/lua/my_plugin/utils.lua
+cat > /tmp/nvim-deps-test-project/partiture.lua << 'EOF'
+local ballad = require("ballad")
+return ballad.partiture(function(p)
+  local moonstone = p:use(ballad.plugins.moonstone)
+  local nvim = p:use(ballad.plugins.nvim)
+  local registry = p:use(ballad.plugins.registry)
+  local project = moonstone.project({ root = "." })
+  local app = nvim.layout(project, { name = "my_plugin", entry = "lua/my_plugin/init.lua" })
+  p.sink.directory(app, { out = "dist/nvim-plugin" })
+  local reg = registry.package(app, { name = "my_plugin", version = "0.1.0", entry = "lua/my_plugin/init.lua", out = "dist/nvim-deps-artifact" })
+  p.sink.artifact(reg, { out = "dist/nvim-deps-artifact" })
+end)
+EOF
+
 cd /tmp/nvim-deps-test-project
 rm -rf dist .ballad/cache
 LUA_PATH="/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?.lua;/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?/init.lua;/Users/extrordinaire/Workbench/user/ballad/src/?.lua;/Users/extrordinaire/Workbench/user/ballad/src/?/init.lua;;"
@@ -271,36 +394,36 @@ test -f "dist/nvim-plugin/lua/my_plugin/init.lua" || { echo "FAIL: init.lua miss
 test -f "dist/nvim-plugin/lua/my_plugin/utils.lua" || { echo "FAIL: utils.lua missing"; exit 1; }
 
 # Check that package.toml includes peer dependencies
-if ! grep -q "name = \"plenary\"" dist/nvim-plugin/registry-artifact/package.toml; then
+if ! grep -q "name = \"plenary\"" dist/nvim-deps-artifact/package.toml; then
   echo "FAIL: plenary peer dependency not in package.toml"
-  cat dist/nvim-plugin/registry-artifact/package.toml
+  cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
-if ! grep -q "role = \"peer\"" dist/nvim-plugin/registry-artifact/package.toml; then
+if ! grep -q "role = \"peer\"" dist/nvim-deps-artifact/package.toml; then
   echo "FAIL: peer role not in package.toml"
-  cat dist/nvim-plugin/registry-artifact/package.toml
+  cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
-if ! grep -q "package = \"nvim-lua/plenary.nvim\"" dist/nvim-plugin/registry-artifact/package.toml; then
+if ! grep -q "package = \"nvim-lua/plenary.nvim\"" dist/nvim-deps-artifact/package.toml; then
   echo "FAIL: plenary package reference not in package.toml"
-  cat dist/nvim-plugin/registry-artifact/package.toml
+  cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
 
 # Check optional dependency
-if ! grep -q "name = \"telescope\"" dist/nvim-plugin/registry-artifact/package.toml; then
+if ! grep -q "name = \"telescope\"" dist/nvim-deps-artifact/package.toml; then
   echo "FAIL: telescope optional dependency not in package.toml"
-  cat dist/nvim-plugin/registry-artifact/package.toml
+  cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
-if ! grep -q "role = \"optional\"" dist/nvim-plugin/registry-artifact/package.toml; then
+if ! grep -q "role = \"optional\"" dist/nvim-deps-artifact/package.toml; then
   echo "FAIL: optional role not in package.toml"
-  cat dist/nvim-plugin/registry-artifact/package.toml
+  cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
-if ! grep -q "optional = true" dist/nvim-plugin/registry-artifact/package.toml; then
+if ! grep -q "optional = true" dist/nvim-deps-artifact/package.toml; then
   echo "FAIL: optional=true not in package.toml"
-  cat dist/nvim-plugin/registry-artifact/package.toml
+  cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
 

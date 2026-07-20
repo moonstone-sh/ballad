@@ -1,3 +1,12 @@
+---@meta
+
+---@class CacheTaskEntry
+---@field version integer cache version
+---@field key string cache key
+---@field assets table[] stored asset metadata list
+---@field outputs string[] stored output path list
+---@field timestamp string ISO timestamp
+
 local cache = {}
 local process = require("ballad.process")
 local dkjson = require("dkjson")
@@ -101,10 +110,69 @@ function cache.compute_key(node, input_results, plugin_version)
   return process.b3sum_string(json)
 end
 
+local function glob_to_pattern(glob)
+  if glob:match("/%*%*$") then
+    local prefix = glob:gsub("/%*%*$", "")
+    return "^" .. prefix:gsub("([%.%+%-%^%$%(%)%%])", "%%%1") .. "/.*$"
+  end
+  if glob:sub(1, 2) == "**" then
+    local suffix = glob:sub(3)
+    if suffix:sub(1, 1) == "/" then
+      return ".*" .. suffix:gsub("([%.%+%-%^%$%(%)%%])", "%%%1") .. "$"
+    end
+    return ".*" .. glob:gsub("([%.%+%-%^%$%(%)%%])", "%%%1") .. ".*"
+  end
+  local pattern = glob:gsub("([%.%+%-%^%$%(%)%%])", "%%%1")
+  pattern = pattern:gsub("%*%*/", ".-/")
+  pattern = pattern:gsub("%*%*", ".-")
+  pattern = pattern:gsub("%*", "[^/]+")
+  return "^" .. pattern .. "$"
+end
+
 -- Compute a stable cache key for a native task
 function cache.compute_native_key(opts, plugin_name, method_name)
   local input_hashes = {}
+  local inputs_to_process = {}
+
+  local function collect_inputs(inp)
+    if type(inp) == "string" then
+      if inp:find("%*") then
+        local glob_pat = glob_to_pattern(inp)
+        local files = fs.list_files(".")
+        for _, f in ipairs(files) do
+          local rel = f:gsub("^%./", "")
+          if rel:match(glob_pat) or f:match(glob_pat) then
+            table.insert(inputs_to_process, rel)
+          end
+        end
+      elseif fs.is_dir(inp) then
+        local files = fs.list_files(inp)
+        for _, f in ipairs(files) do
+          table.insert(inputs_to_process, f)
+        end
+      else
+        table.insert(inputs_to_process, inp)
+      end
+    elseif type(inp) == "table" then
+      if inp.assets then
+        for _, asset in ipairs(inp.assets) do
+          if asset.source_path then
+            table.insert(inputs_to_process, asset.source_path)
+          end
+        end
+      else
+        for _, sub in ipairs(inp) do
+          collect_inputs(sub)
+        end
+      end
+    end
+  end
+
   for _, input in ipairs(opts.inputs or {}) do
+    collect_inputs(input)
+  end
+
+  for _, input in ipairs(inputs_to_process) do
     local content = fs.read_file(input)
     table.insert(input_hashes, {
       path = input,
@@ -118,7 +186,8 @@ function cache.compute_native_key(opts, plugin_name, method_name)
     kind = "native",
     plugin = plugin_name or "unknown",
     method = method_name or "unknown",
-    tool = opts.tool,
+    tool = opts.tool or (opts.cmd and opts.cmd:match("^%S+")),
+    cmd = opts.cmd,
     args = opts.args,
     cwd = opts.cwd,
     env = opts.env,

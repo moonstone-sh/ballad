@@ -255,7 +255,33 @@ local nvim_plugin = {
     end
 
     -- Build dependency classification
+    local project_asset = nil
+    if inputs[1] and inputs[1].assets then
+      for _, a in ipairs(inputs[1].assets) do
+        if a.kind == "project" or (a.metadata and a.metadata.kind == "moonstone_project") then
+          project_asset = a
+          break
+        end
+      end
+    end
     local dependency_map = opts.dependencies or {}
+    if not opts.dependencies and project_asset and project_asset.metadata and project_asset.metadata.dependencies then
+      for role, deps_table in pairs(project_asset.metadata.dependencies) do
+        for dep_name, dep_spec in pairs(deps_table) do
+          local spec = {
+            role = role,
+            package = dep_spec.package or dep_name,
+            constraint = dep_spec.constraint or "*",
+            optional = (role == "optional") or dep_spec.optional or false,
+          }
+          dependency_map[dep_name] = spec
+          if dep_name:find("/") then
+            local short = dep_name:match("/([^/]+)$"):gsub("%.nvim$", "")
+            dependency_map[short] = spec
+          end
+        end
+      end
+    end
     -- Normalize optional shorthand: { optional = true } -> { role = "optional" }
     for name, spec in pairs(dependency_map) do
       if spec.optional and not spec.role then
@@ -363,7 +389,7 @@ local nvim_plugin = {
       virtual_path = out_dir,
       output_path = out_dir,
       metadata = {
-        entry = opts.module and ("lua/" .. opts.module:gsub("%.", "/") .. ".lua") or nil,
+        entry = opts.entry or (opts.module and ("lua/" .. opts.module:gsub("%.", "/") .. ".lua")) or (lua_file_rels[1] and lua_file_rels[1]) or "init.lua",
         libexec_root = "",
         bin_name = meta.manifest and meta.manifest.package and meta.manifest.package.name or "nvim-plugin",
         layout = "nvim",

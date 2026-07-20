@@ -79,6 +79,24 @@ p.sink.directory(app, { out = "dist/meteorite", file_graph = true })
 
 For Lua+Zig projects, run the Zig build as a native task before the sink or registry artifact so compiled Lua C modules exist in `.moonstone/env/lib/lua/<abi>/` and are copied into `libexec/<name>/lib/`.
 
+## Native Tasks & Script Execution
+
+Run Moonstone project scripts (`moon run <script>`) or arbitrary commands (`moon exec <cmd>`) with content-addressed input caching and output verification:
+
+```lua
+local project = moonstone.project({ root = "." })
+
+-- Run `moon run build` when src/*.moon changes, outputting dist/src/main.lua
+local build = moonstone:run("build", {
+  inputs = { "src/*.moon" },
+  outputs = { "dist/src/main.lua" },
+})
+
+p.sink.none(build)
+```
+
+See [docs/INPUTS_AND_OUTPUTS.md](docs/INPUTS_AND_OUTPUTS.md) for detailed documentation on `inputs`, `outputs`, caching, and terminal sinks (`p.sink.none`).
+
 ## LÖVE Example
 
 ```lua
