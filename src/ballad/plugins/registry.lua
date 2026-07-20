@@ -48,6 +48,38 @@ local function toml_quote(value)
 	return '"' .. tostring(value):gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
 end
 
+local function resolve_readme_content(inputs, opts)
+	if opts and type(opts.readme_content) == "string" and opts.readme_content ~= "" then
+		return opts.readme_content
+	end
+	local project_asset = nil
+	for _, input in ipairs(inputs or {}) do
+		if type(input) == "table" and input.assets then
+			for _, a in ipairs(input.assets) do
+				if a.kind == "project" then
+					project_asset = a
+					break
+				end
+			end
+		elseif type(input) == "table" and input.kind == "project" then
+			project_asset = input
+			break
+		end
+	end
+	local project_root = (project_asset and project_asset.metadata and project_asset.metadata.root) or "."
+	local readme_rel = (opts and type(opts.readme) == "string" and opts.readme ~= "") and opts.readme
+		or (project_asset and project_asset.metadata and project_asset.metadata.readme)
+		or "README.md"
+	if readme_rel and readme_rel ~= "" then
+		local candidate = path.is_absolute(readme_rel) and readme_rel or path.join(project_root, readme_rel)
+		local content = fs.read_file(candidate)
+		if content then
+			return content
+		end
+	end
+	return nil
+end
+
 local function is_array(value)
 	if type(value) ~= "table" then return false end
 	local max = 0
@@ -270,21 +302,7 @@ registry.package = function(ctx, inputs, opts)
 	end
 	local bin_name = meta.bin_name or meta.name or "app"
 	local libexec_root = meta.libexec_root or ""
-	-- Resolve README content: explicit opts.readme_content, else read opts.readme / project readme.
-	local readme_content = opts.readme_content
-	if not readme_content then
-		local project_asset = nil
-		for _, a in ipairs(inputs[1].assets or {}) do
-			if a.kind == "project" then project_asset = a break end
-		end
-		local project_root = (project_asset and project_asset.metadata and project_asset.metadata.root) or "."
-		local readme_rel = opts.readme or (project_asset and project_asset.metadata and project_asset.metadata.readme) or nil
-		if readme_rel and readme_rel ~= "" then
-			local candidate = path.join(project_root, readme_rel)
-			local content = fs.read_file(candidate)
-			if content then readme_content = content end
-		end
-	end
+	local readme_content = resolve_readme_content(inputs, opts)
 	local entry_prefix = libexec_root ~= "" and libexec_root .. "/" or ""
 	local provides_list = {}
 	if target == "any" then
@@ -516,17 +534,7 @@ registry.source_package = function(ctx, inputs, opts)
 	local digest = blob_hash:sub(4)
 	local url = string.format("blobs/b3/%s/%s/%s.tar.zst", digest:sub(1, 2), digest:sub(3, 4), digest)
 
-	-- Optional README: opts.readme_content, else read opts.readme from the project root.
-	local readme_content = opts.readme_content
-	if not readme_content and opts.readme and opts.readme ~= "" then
-		local project_asset = nil
-		for _, a in ipairs((inputs[1] and inputs[1].assets) or {}) do
-			if a.kind == "project" then project_asset = a break end
-		end
-		local project_root = (project_asset and project_asset.metadata and project_asset.metadata.root) or "."
-		local content = fs.read_file(path.join(project_root, opts.readme))
-		if content then readme_content = content end
-	end
+	local readme_content = resolve_readme_content(inputs, opts)
 	local package_lines = {
 		"[package]",
 		"name = " .. toml_quote(package_name),
@@ -667,11 +675,7 @@ registry.runtime = function(ctx, inputs, opts)
 	local descriptor_path = path.join(out_dir, descriptor_stem .. "-" .. version .. "-package.toml")
 	local publish_path = path.join(out_dir, "publish-" .. descriptor_stem .. "-" .. version .. ".sh")
 	local artifact_paths = {}
-	local readme_content = opts.readme_content
-	if not readme_content and opts.readme and opts.readme ~= "" then
-		local content = fs.read_file(opts.readme)
-		if content then readme_content = content end
-	end
+	local readme_content = resolve_readme_content(inputs, opts)
 	local package_lines = {
 		"[package]",
 		'name = "' .. package_name .. '"',
