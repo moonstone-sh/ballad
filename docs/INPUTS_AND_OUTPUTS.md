@@ -48,7 +48,7 @@ When building projects that require pre-export compilation (such as transpiling 
 local ballad = require("ballad")
 
 return ballad.partiture(function(p)
-  local moonstone = p:use("moonstone")
+  local moonstone = p:use(ballad.plugins.moonstone)
 
   local project = moonstone.project({ root = "." })
 
@@ -62,6 +62,23 @@ return ballad.partiture(function(p)
   p.sink.none(build)
 end)
 ```
+
+If a later layout reads those generated files, connect the build node with
+`depends_on`. This is an ordering edge rather than a copied asset set:
+
+```lua
+local app = layout.libexec(project, {
+  entry = "build/src/main.lua",
+  include = { "build/src/**" },
+  lua_paths = { "lua", "build/src" },
+  packages = { "argparse" },
+  depends_on = build,
+})
+```
+
+The layout includes only matching project files, adds the listed module roots
+to its launcher, and projects only the named runtime packages. This keeps
+build-only tools out of the distributable.
 
 ### B. Directory Outputs (Multi-file Compilers)
 

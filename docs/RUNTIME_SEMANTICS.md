@@ -10,6 +10,18 @@ Ballad separates three runtime contexts to ensure reliable cross-platform export
 *   **Moonstone Isolation**: When you execute a tool like Ballad via `moon exec`, Moonstone identifies the tool's specific runtime requirements and generates an isolated shim. This ensures Ballad always runs with its required interpreter (e.g., LuaJIT), even if your project is configured for a different version (e.g., Lua 5.4).
 *   **Ballad Portability**: Ballad uses Moonstone metadata to resolve and bundle exactly what is needed for a target platform.
 
+## Tool Closure Inputs
+
+`moonstone.tool(project, { name = "tool-name" })` introduces a fourth, derived
+context: the selected executable tool closure. Moonstone resolves that closure
+from the synchronized lockfile and records its executable paths, Lua module
+paths, native module paths, and compatible runtime in the tool's private scope.
+
+Ballad consumes those paths as source assets. It does not solve the tool's
+dependencies again and does not merge them into the host application's runtime
+dependency set. `layout.exec(tool, ...)` can then export the selected closure as
+a runnable tool distribution.
+
 ## Export Strategies
 
 ### Agnostic Export

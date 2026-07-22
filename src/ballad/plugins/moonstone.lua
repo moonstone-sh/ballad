@@ -5,6 +5,9 @@
 ---@field roles? string[] dependency roles to enrich (default {"runtime"})
 ---@field moon? string path or name of Moonstone binary (default "moon")
 
+---@class MoonstoneToolOpts
+---@field name string executable name from the synchronized Moonstone project
+
 ---@class MoonstoneRunOpts
 ---@field script? string named script from moonstone.toml to run
 ---@field inputs? string[]|AssetSet[] list of input file paths, globs (e.g. "src/*.moon"), or asset sets to track for cache invalidation
@@ -32,6 +35,7 @@ local dkjson = require("dkjson")
 local fs = require("ballad.fs")
 local path = require("ballad.path")
 local process = require("ballad.process")
+local toml = require("ballad.toml")
 
 local function parse_dependencies_toml(content)
   local dependencies = {}
@@ -171,6 +175,95 @@ local function find_moon_cli(opts)
   return "moon"
 end
 
+local function scope_root(pattern, suffix)
+  if type(pattern) ~= "string" or pattern:sub(-#suffix) ~= suffix then return nil end
+  return pattern:sub(1, #pattern - #suffix)
+end
+
+local function add_scope_files(ctx, assets, roots, suffix, kind, prefix, seen)
+  for _, root in ipairs(roots or {}) do
+    for _, file_path in ipairs(fs.list_files(root)) do
+      local source = fs.readlink(file_path)
+      if (kind == "lua" and fs.is_lua(file_path)) or (kind == "c_module" and fs.is_binary_module(file_path)) then
+        local relative = path.relative(file_path, root)
+        local virtual_path = prefix .. "/" .. relative
+        if not seen[virtual_path] then
+          seen[virtual_path] = true
+          assets:add(ctx.graph:add_asset({
+            kind = "tool_source",
+            source_path = source,
+            virtual_path = virtual_path,
+            metadata = { scope_kind = kind },
+          }))
+        end
+      end
+    end
+  end
+end
+
+local function tool_scope_assets(ctx, project_asset, opts)
+  local meta = project_asset.metadata or {}
+  local root = meta.root or meta.project_root
+  local tool_name = opts.name or opts.tool or opts.bin
+  if not tool_name or tool_name == "" then ctx.fail("moonstone.tool requires opts.name") end
+
+  local scope_path = path.join(root, ".moonstone/env/bin-runtime", tool_name, "env.toml")
+  local scope_content = fs.read_file(scope_path)
+  if not scope_content then ctx.fail("moonstone.tool: missing synchronized scope for " .. tool_name .. "; run moon sync") end
+  local scope = toml.parse(scope_content)
+  local env = scope.env or {}
+  local tool_link = path.join(root, ".moonstone/env/bin", tool_name)
+  if not fs.is_file(tool_link) then ctx.fail("moonstone.tool: executable not found in project environment: " .. tool_name) end
+
+  local assets = graph.AssetSet.new()
+  local executable = fs.readlink(tool_link)
+  assets:add(ctx.graph:add_asset({
+    kind = "tool",
+    source_path = executable,
+    metadata = {
+      kind = "moonstone_tool",
+      name = tool_name,
+      root = root,
+      executable = executable,
+      runtime = meta.runtime,
+      scope_path = scope_path,
+      scope = env,
+    },
+  }))
+
+  local seen = {}
+  local lua_roots, c_roots = {}, {}
+  for _, pattern in ipairs(env.lua_path or {}) do
+    local scope_path_root = scope_root(pattern, "/?.lua") or scope_root(pattern, "/?/init.lua")
+    if scope_path_root then lua_roots[#lua_roots + 1] = scope_path_root end
+  end
+  for _, pattern in ipairs(env.lua_cpath or {}) do
+    local scope_path_root = scope_root(pattern, "/?.so") or scope_root(pattern, "/?.dylib") or scope_root(pattern, "/?.dll")
+    if scope_path_root then c_roots[#c_roots + 1] = scope_path_root end
+  end
+  add_scope_files(ctx, assets, lua_roots, ".lua", "lua", "lua", seen)
+  add_scope_files(ctx, assets, c_roots, ".so", "c_module", "lib", seen)
+
+  for _, bin_root in ipairs(env.path_prepend or {}) do
+    for _, file_path in ipairs(fs.list_files(bin_root)) do
+      if fs.is_file(file_path) then
+        local virtual_path = "bin/" .. path.basename(file_path)
+        if not seen[virtual_path] then
+          seen[virtual_path] = true
+          assets:add(ctx.graph:add_asset({
+            kind = "tool_source",
+            source_path = fs.readlink(file_path),
+            virtual_path = virtual_path,
+            metadata = { scope_kind = "bin", executable = true },
+          }))
+        end
+      end
+    end
+  end
+
+  return assets
+end
+
 local moonstone_registry = require("ballad.moonstone_registry")
 
 return {
@@ -179,6 +272,12 @@ return {
   methods = {
     project = {
       inputs = {},
+      outputs = { "asset_set" },
+      cacheable = false,
+      parallel_safe = true,
+    },
+    tool = {
+      inputs = { "asset_set" },
       outputs = { "asset_set" },
       cacheable = false,
       parallel_safe = true,
@@ -355,6 +454,16 @@ return {
     })
     assets:add(asset)
     return assets
+  end,
+
+  tool = function(ctx, inputs, opts)
+    opts = opts or {}
+    local input = inputs[1]
+    local project_asset = input and input.assets and input.assets[1]
+    if not project_asset or project_asset.kind ~= "project" then
+      ctx.fail("moonstone.tool requires a moonstone.project node as input")
+    end
+    return tool_scope_assets(ctx, project_asset, opts)
   end,
 
   ---Run a named script from moonstone.toml inside the Moonstone project environment.

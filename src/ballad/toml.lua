@@ -6,6 +6,23 @@ local function strip_quotes(value)
     or value:match("^%s*(.-)%s*$")
 end
 
+local function parse_value(value)
+  local trimmed = value:match("^%s*(.-)%s*$")
+  if trimmed:match("^%[.*%]$") then
+    local items = {}
+    for item in trimmed:sub(2, -2):gmatch('"(.-)"') do
+      items[#items + 1] = item
+    end
+    if #items == 0 then
+      for item in trimmed:sub(2, -2):gmatch("'(.-)'") do
+        items[#items + 1] = item
+      end
+    end
+    return items
+  end
+  return strip_quotes(value)
+end
+
 function toml.parse(content)
   local result = {}
   local section = result
@@ -25,7 +42,7 @@ function toml.parse(content)
       local key, value = line:match('^"?([^"=]+)"?%s*=%s*(.-)%s*$')
 
       if key and value then
-        section[key:match("^%s*(.-)%s*$")] = strip_quotes(value)
+        section[key:match("^%s*(.-)%s*$")] = parse_value(value)
       end
     end
   end

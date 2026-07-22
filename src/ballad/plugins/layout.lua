@@ -27,6 +27,63 @@ local function export_filter(meta)
   end
 end
 
+local function glob_to_pattern(glob)
+  local pattern = glob:gsub("([%.%+%-%^%$%(%)%%])", "%%%1")
+  pattern = pattern:gsub("%*%*/", ".-/")
+  pattern = pattern:gsub("%*%*", ".-")
+  pattern = pattern:gsub("%*", "[^/]+")
+  return "^" .. pattern .. "$"
+end
+
+local function matches_any(file_path, patterns)
+  if not patterns then return true end
+  for _, glob in ipairs(patterns) do
+    if file_path:match(glob_to_pattern(glob)) then return true end
+  end
+  return false
+end
+
+local function is_default_excluded(relative)
+  return relative:match("^%.git/")
+    or relative:match("^%.moonstone/")
+    or relative:match("^%.ballad/")
+    or relative:match("^dist/")
+    or relative == "moonstone.lock"
+end
+
+local function lua_path_prefixes(roots)
+  local prefixes = {}
+  for _, root in ipairs(roots) do
+    if root:sub(1, 1) == "/" or root:match("^%.%.?/") or root:match("/%.%.?/") then
+      error("layout.libexec lua_paths entries must be relative paths")
+    end
+    table.insert(prefixes, "$LIBEXEC/" .. root .. "/?.lua")
+    table.insert(prefixes, "$LIBEXEC/" .. root .. "/?/init.lua")
+  end
+  return table.concat(prefixes, ";")
+end
+
+local function selected_package_roots(meta, names)
+  if not names then return nil end
+  local selected = {}
+  for _, name in ipairs(names) do selected[name] = true end
+  local roots = {}
+  for _, package in ipairs(meta.packages or {}) do
+    if selected[package.name] and package.artifact_path then
+      table.insert(roots, package.artifact_path)
+    end
+  end
+  return roots
+end
+
+local function source_is_in_roots(source, roots)
+  if not roots then return true end
+  for _, root in ipairs(roots) do
+    if source == root or source:sub(1, #root + 1) == root .. "/" then return true end
+  end
+  return false
+end
+
 local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
   opts = opts or {}
   local project_asset = inputs[1].assets[1]
@@ -41,6 +98,8 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
   local interpreter = opts.interpreter or "lua"
   local runnable = opts.runnable
   if runnable == nil then runnable = true end
+  local lua_paths = opts.lua_paths or { "lua", "src" }
+  local package_roots = selected_package_roots(meta, opts.packages)
   local files = {}
   local destinations = {}
   local function add_file(task)
@@ -52,7 +111,7 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
   end
   for _, source in ipairs(fs.list_files(meta.root)) do
     local relative = path.relative(source, meta.root)
-    if not (relative:match("^%.git/") or relative:match("^%.moonstone/") or relative:match("^%.ballad/") or relative:match("^dist/") or relative == "moonstone.lock") then
+    if not is_default_excluded(relative) and matches_any(relative, opts.include) and not (opts.exclude and matches_any(relative, opts.exclude)) then
       add_file({ src = source, dest = libexec_root .. "/" .. relative, kind = "project" })
     end
   end
@@ -62,7 +121,7 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
       if fs.is_lua(module_path) then
         local relative = path.relative(module_path, module_root)
         local source = fs.readlink(module_path)
-        if should_export(relative, source) then
+        if should_export(relative, source) and source_is_in_roots(source, package_roots) then
           add_file({ src = source, dest = libexec_root .. "/lua/" .. relative, kind = "package" })
         end
       end
@@ -74,7 +133,7 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
       if fs.is_binary_module(module_path) then
         local relative = path.relative(module_path, lib_module_root)
         local source = fs.readlink(module_path)
-        if should_export(relative, source) then
+        if should_export(relative, source) and source_is_in_roots(source, package_roots) then
           add_file({ src = source, dest = libexec_root .. "/lib/" .. relative, kind = "package" })
         end
       end
@@ -116,7 +175,7 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
       "else",
       '  LUA_BIN="${BALLAD_LUA:-' .. interpreter .. '}"',
       "fi",
-      'export LUA_PATH="$LIBEXEC/lua/?.lua;$LIBEXEC/lua/?/init.lua;$LIBEXEC/src/?.lua;$LIBEXEC/src/?/init.lua;${LUA_PATH:-};;"',
+      'export LUA_PATH="' .. lua_path_prefixes(lua_paths) .. ';${LUA_PATH:-};;"',
       'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
       'exec "$LUA_BIN" "$LIBEXEC/' .. entry .. '" "$@"',
     }
@@ -150,6 +209,72 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
     },
   }))
   assets:add(inputs[1].assets[1])
+  return assets
+end
+
+local function build_tool_exec_layout(ctx, inputs, opts)
+  opts = opts or {}
+  local tool_asset = nil
+  for _, asset in ipairs(inputs[1].assets or {}) do
+    if asset.kind == "tool" and asset.metadata and asset.metadata.kind == "moonstone_tool" then
+      tool_asset = asset
+      break
+    end
+  end
+  if not tool_asset then ctx.fail("layout.exec requires a moonstone.tool node") end
+
+  local tool = tool_asset.metadata
+  local name = opts.name or tool.name
+  local bin_name = opts.bin or name
+  local libexec_root = "libexec/" .. name
+  local assets = graph.AssetSet.new()
+  local destinations = {}
+  for _, asset in ipairs(inputs[1].assets) do
+    if asset.kind == "tool_source" and asset.source_path and asset.virtual_path then
+      local destination = libexec_root .. "/" .. asset.virtual_path
+      if not destinations[destination] then
+        destinations[destination] = true
+        assets:add(ctx.graph:add_asset({
+          kind = "package",
+          source_path = asset.source_path,
+          virtual_path = destination,
+          metadata = { executable = asset.metadata and asset.metadata.executable == true },
+        }))
+      end
+    end
+  end
+
+  local runtime_name = tool.runtime and tool.runtime.name or "lua"
+  local launcher = table.concat({
+    "#!/usr/bin/env sh",
+    "set -eu",
+    'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"',
+    'LIBEXEC="$ROOT/' .. libexec_root .. '"',
+    'if [ -x "$ROOT/bin/lua" ]; then',
+    '  LUA_BIN="$ROOT/bin/lua"',
+    'elif [ -x "$ROOT/bin/luajit" ]; then',
+    '  LUA_BIN="$ROOT/bin/luajit"',
+    "else",
+    '  LUA_BIN="${BALLAD_LUA:-' .. runtime_name .. '}"',
+    "fi",
+    'export PATH="$LIBEXEC/bin:${PATH:-}"',
+    'export LUA_PATH="$LIBEXEC/lua/?.lua;$LIBEXEC/lua/?/init.lua;${LUA_PATH:-};;"',
+    'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
+    'exec "$LUA_BIN" "$LIBEXEC/bin/' .. tool.name .. '" "$@"',
+  }, "\n") .. "\n"
+  assets:add(ctx.graph:add_asset({
+    kind = "generated",
+    virtual_path = "bin/" .. bin_name,
+    content = launcher,
+    generated = true,
+    metadata = { executable = true },
+  }))
+  assets:add(ctx.graph:add_asset({
+    kind = "files",
+    virtual_path = "tool-exec-root",
+    metadata = { layout = "tool_exec", name = name, bin_name = bin_name, entry = "bin/" .. tool.name },
+  }))
+  assets:add(tool_asset)
   return assets
 end
 
@@ -198,6 +323,11 @@ return {
   exec = function(ctx, inputs, opts)
     opts = opts or {}
     if opts.runnable == nil then opts.runnable = true end
+    for _, asset in ipairs(inputs[1].assets or {}) do
+      if asset.kind == "tool" and asset.metadata and asset.metadata.kind == "moonstone_tool" then
+        return build_tool_exec_layout(ctx, inputs, opts)
+      end
+    end
     return build_libexec_layout(ctx, inputs, opts, "exec", "exec")
   end,
 

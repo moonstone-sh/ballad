@@ -83,19 +83,38 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
           options = first
         end
       end
+      local node_options = {}
+      for key, value in pairs(options) do
+        if key ~= "depends_on" then node_options[key] = value end
+      end
       local node = graph:add_node({
         plugin = name,
         method = method_name,
         role = method_contract.role or "transform",
         label = method_contract.label,
         inputs = inputs,
-        options = options,
+        options = node_options,
         effects = method_contract.effects or {},
         progress_weight = method_contract.progress_weight,
         cacheable = method_contract.cacheable,
         parallel_safe = method_contract.parallel_safe,
         enabled = options.enabled,
       })
+      local dependencies = options.depends_on
+      if dependencies then
+        local handles = getmetatable(dependencies) == NodeHandle and { dependencies } or dependencies
+        if type(handles) ~= "table" then
+          error("depends_on must be a pipeline node handle or an array of node handles")
+        end
+        for _, handle in ipairs(handles) do
+          if getmetatable(handle) ~= NodeHandle then
+            error("depends_on entries must be pipeline node handles")
+          end
+          table.insert(node.inputs, handle._id)
+          graph.edges[handle._id] = graph.edges[handle._id] or {}
+          table.insert(graph.edges[handle._id], node.id)
+        end
+      end
       local extra_meta = nil
       local prepare_fn = contract[method_name .. "_prepare"]
       if prepare_fn then

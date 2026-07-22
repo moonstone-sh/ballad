@@ -302,6 +302,11 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field runnable boolean|nil Whether to generate the layout launcher, defaults to true.
 ---@field bundle_runtime boolean|nil Bundle runtime binary (`lua`/`luajit`) into `bin/`.
 ---@field bundle_interpreter boolean|nil Alias for `bundle_runtime`.
+---@field include string[]|nil Project file glob patterns to export; defaults to all non-generated project files.
+---@field exclude string[]|nil Project file glob patterns to omit after inclusion.
+---@field lua_paths string[]|nil Relative Lua module roots in the launcher; defaults to `{ "lua", "src" }`.
+---@field packages string[]|nil Package names whose projected Lua/C modules are included; defaults to all runtime-projected modules.
+---@field depends_on NodeHandle|NodeHandle[]|nil Nodes that must finish before the layout reads generated project files.
 
 ---@class LayoutExecOptions: LayoutLibexecOptions
 

@@ -59,3 +59,9 @@ Plugins provide transforms only. Ballad core owns run boundaries and terminal ma
 ```text
 source -> transform -> sink
 ```
+
+The Moonstone plugin can introduce a synchronized executable scope with
+`moonstone.tool(project, { name = "tool-name" })`. It emits a generic tool
+asset plus source assets for the scope's executable, Lua roots, native-module
+roots, and dependent executable directories. `layout.exec(...)` consumes that
+asset set to create a runnable tool distribution.
