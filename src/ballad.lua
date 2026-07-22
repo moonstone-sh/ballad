@@ -11,7 +11,6 @@ return {
     lua = require("ballad.plugins.lua"),
     moonstone = require("ballad.plugins.moonstone"),
     nvim = require("ballad.plugins.nvim"),
-    registry = require("ballad.plugins.registry"),
     runtime = require("ballad.plugins.runtime"),
     input = {
       moonstone = require("ballad.plugins.input.moonstone"),

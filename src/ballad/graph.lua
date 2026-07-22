@@ -217,11 +217,17 @@ end
 function Graph:topological_order()
   local in_degree = {}
   for id, node in pairs(self.nodes) do
-    in_degree[id] = 0
+    if node.enabled ~= false then
+      in_degree[id] = 0
+    end
   end
-  for id, node in pairs(self.nodes) do
-    for _, input_id in ipairs(node.inputs) do
-      in_degree[id] = in_degree[id] + 1
+  for id, children in pairs(self.edges) do
+    if self.nodes[id] and self.nodes[id].enabled ~= false then
+      for _, child_id in ipairs(children) do
+        if self.nodes[child_id] and self.nodes[child_id].enabled ~= false then
+          in_degree[child_id] = (in_degree[child_id] or 0) + 1
+        end
+      end
     end
   end
   local queue = {}
@@ -236,15 +242,21 @@ function Graph:topological_order()
     local current = table.remove(queue, 1)
     table.insert(order, current)
     for _, child_id in ipairs(self.edges[current] or {}) do
-      in_degree[child_id] = in_degree[child_id] - 1
-      if in_degree[child_id] == 0 then
-        table.insert(queue, child_id)
+      if in_degree[child_id] then
+        in_degree[child_id] = in_degree[child_id] - 1
+        if in_degree[child_id] == 0 then
+          table.insert(queue, child_id)
+        end
       end
     end
   end
-  local count = 0
-  for _ in pairs(self.nodes) do count = count + 1 end
-  if #order ~= count then
+  local enabled_count = 0
+  for _, node in pairs(self.nodes) do
+    if node.enabled ~= false then
+      enabled_count = enabled_count + 1
+    end
+  end
+  if #order ~= enabled_count then
     error("Graph contains a cycle")
   end
   return order

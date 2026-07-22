@@ -34,9 +34,9 @@ cat > "$WORK_DIR/partiture.lua" <<'LUA'
 local ballad = require("ballad")
 
 return ballad.partiture(function(p)
-  local registry = p:use(ballad.plugins.registry)
+  local moonstone = p:use(ballad.plugins.moonstone)
   local sources = p.source.directory(".")
-  local source_artifact = registry.source_package(sources, {
+  local source_artifact = moonstone.registry.source_package(sources, {
     name = "user/meteorite",
     version = "1.2.3",
     kind = "lib",
@@ -102,9 +102,8 @@ local ballad = require("ballad")
 
 return ballad.partiture(function(p)
   local moonstone = p:use(ballad.plugins.moonstone)
-  local registry = p:use(ballad.plugins.registry)
   local project = moonstone.project({ root = "." })
-  local source_artifact = registry.source_package(project, {
+  local source_artifact = moonstone.registry.source_package(project, {
     name = "user/meteorite",
     version = project.version,
     kind = "lib",

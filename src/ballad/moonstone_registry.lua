@@ -39,7 +39,7 @@ local fs = require("ballad.fs")
 local path = require("ballad.path")
 local process = require("ballad.process")
 
-registry.name = "ballad.plugins.registry"
+registry.name = "ballad.moonstone_registry"
 registry.version = "0.1.0"
 
 registry.methods = {

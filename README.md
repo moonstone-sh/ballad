@@ -14,8 +14,8 @@ moon exec ballad
 You can also pass a partiture explicitly:
 
 ```sh
-moon exec ballad -- play partiture.lua
-moon exec ballad -- ./release.partiture.lua
+moon exec ballad play partiture.lua
+moon exec ballad ./release.partiture.lua
 ```
 
 ## Partiture API

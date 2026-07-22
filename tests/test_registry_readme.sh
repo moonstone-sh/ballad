@@ -32,9 +32,9 @@ cat > "$WORK_DIR/partiture.lua" <<'LUA'
 local ballad = require("ballad")
 
 return ballad.partiture(function(p)
-  local registry = p:use(ballad.plugins.registry)
+  local moonstone = p:use(ballad.plugins.moonstone)
   local sources = p.source.directory(".")
-  local source_artifact = registry.source_package(sources, {
+  local source_artifact = moonstone.registry.source_package(sources, {
     name = "user/readme-demo",
     version = "0.4.2",
     kind = "lib",

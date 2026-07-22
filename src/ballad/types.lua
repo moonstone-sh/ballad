@@ -227,6 +227,7 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field stdout fun(input: NodeHandle, opts: SinkStdoutOptions|nil): NodeHandle Print asset/file graph data to stdout.
 ---@field file_graph fun(input: NodeHandle, opts: SinkFileGraphOptions): NodeHandle Write a `file-graph.json`-style JSON file.
 ---@field artifact fun(input: NodeHandle, opts: SinkArtifactOptions): NodeHandle Materialize a single artifact path or directory.
+---@field none fun(input?: NodeHandle|AssetSet|nil, opts?: table|nil): NodeHandle Ignore or suppress output for an input asset set.
 
 ---@class SinkDirectoryOptions
 ---@field out string Output directory.
@@ -299,6 +300,8 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field bin string|nil Launcher name under `bin/`, defaults to `name` or `app`.
 ---@field interpreter string|nil Interpreter used by launcher, defaults to `lua`.
 ---@field runnable boolean|nil Whether to generate the layout launcher, defaults to true.
+---@field bundle_runtime boolean|nil Bundle runtime binary (`lua`/`luajit`) into `bin/`.
+---@field bundle_interpreter boolean|nil Alias for `bundle_runtime`.
 
 ---@class LayoutExecOptions: LayoutLibexecOptions
 
@@ -309,6 +312,8 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field bin string|nil Launcher name when runnable.
 ---@field interpreter string|nil Interpreter used by launcher, defaults to `lua`.
 ---@field runnable boolean|nil Whether to generate a launcher.
+---@field bundle_runtime boolean|nil Bundle runtime binary (`lua`/`luajit`) into `bin/`.
+---@field bundle_interpreter boolean|nil Alias for `bundle_runtime`.
 
 ---@class LayoutLoveOptions: LoveLayoutOptions
 
@@ -346,6 +351,8 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field kind string|nil Package kind, defaults to layout metadata or `bin`.
 ---@field artifact_kind string|nil Artifact kind, defaults to layout metadata or `bin`.
 ---@field description string|nil Package description.
+---@field readme string|nil Path to README file (defaults to README.md if present).
+---@field readme_content string|nil Direct string content for README.md.
 
 ---@class RegistryRuntimeOptions
 ---@field name string|nil Runtime name, defaults to env `RUNTIME_NAME` or `lua`.

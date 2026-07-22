@@ -46,7 +46,6 @@ local ballad = require("ballad")
 return ballad.partiture(function(p)
   local moonstone = p:use(ballad.plugins.moonstone)
   local nvim = p:use(ballad.plugins.nvim)
-  local registry = p:use(ballad.plugins.registry)
   local project = moonstone.project({ root = "." })
   local plugin = nvim.layout(project, {
     module = "my_plugin",
@@ -59,7 +58,7 @@ return ballad.partiture(function(p)
       telescope = { package = "nvim-telescope/telescope.nvim", optional = true },
     }),
   })
-  local artifact = registry.package(plugin, {
+  local artifact = moonstone.registry.package(plugin, {
     name = project.name,
     version = project.version,
     target = "any",

@@ -80,15 +80,45 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
       end
     end
   end
+  if opts.bundle_runtime or opts.bundle_interpreter then
+    local rt = meta.runtime or {}
+    local art_path = meta.runtime_path or rt.artifact_path
+    if art_path and type(rt.bin) == "table" then
+      for bin_key, rel_path in pairs(rt.bin) do
+        local abs_src = path.join(art_path, rel_path)
+        if fs.is_file(abs_src) then
+          add_file({ src = abs_src, dest = "bin/" .. bin_key, kind = "package", executable = true })
+        end
+      end
+    else
+      local env_bin_dir = path.join(meta.root, ".moonstone/env/bin")
+      for _, rt_name in ipairs({ "lua", "luajit", "lua.exe", "luajit.exe" }) do
+        local bfile = path.join(env_bin_dir, rt_name)
+        local target = fs.readlink(bfile)
+        if target and target ~= bfile and fs.is_file(target) then
+          add_file({ src = target, dest = "bin/" .. rt_name, kind = "package", executable = true })
+        elseif fs.is_file(bfile) then
+          add_file({ src = bfile, dest = "bin/" .. rt_name, kind = "package", executable = true })
+        end
+      end
+    end
+  end
   if runnable then
     local launcher_parts = {
       "#!/usr/bin/env sh",
       "set -eu",
       'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"',
       'LIBEXEC="$ROOT/' .. libexec_root .. '"',
+      'if [ -x "$ROOT/bin/lua" ]; then',
+      '  LUA_BIN="$ROOT/bin/lua"',
+      'elif [ -x "$ROOT/bin/luajit" ]; then',
+      '  LUA_BIN="$ROOT/bin/luajit"',
+      "else",
+      '  LUA_BIN="${BALLAD_LUA:-' .. interpreter .. '}"',
+      "fi",
       'export LUA_PATH="$LIBEXEC/lua/?.lua;$LIBEXEC/lua/?/init.lua;$LIBEXEC/src/?.lua;$LIBEXEC/src/?/init.lua;${LUA_PATH:-};;"',
       'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
-      'exec ' .. interpreter .. ' "$LIBEXEC/' .. entry .. '" "$@"',
+      'exec "$LUA_BIN" "$LIBEXEC/' .. entry .. '" "$@"',
     }
     local launcher = table.concat(launcher_parts, "\n") .. "\n"
     add_file({ dest = "bin/" .. bin_name, content = launcher, kind = "generated", executable = true })

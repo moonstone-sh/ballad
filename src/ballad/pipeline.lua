@@ -53,21 +53,34 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
       end
       local inputs = {}
       local options = {}
-      local first = args[1]
-      if type(first) == "table" and getmetatable(first) == NodeHandle then
-        table.insert(inputs, first._id)
-        table.remove(args, 1)
-      end
-      if #args >= 1 then
-        if type(args[1]) == "table" and getmetatable(args[1]) ~= NodeHandle then
-          options = args[1]
-        elseif type(args[1]) == "string" then
-          options[1] = args[1]
-          if type(args[2]) == "table" then
-            for k, v in pairs(args[2]) do
+      if #args >= 2 then
+        local first = table.remove(args, 1)
+        if type(first) == "table" and getmetatable(first) == NodeHandle then
+          table.insert(inputs, first._id)
+          if type(args[1]) == "table" then
+            options = args[1]
+          end
+        elseif type(first) == "string" then
+          options[1] = first
+          if type(args[1]) == "table" then
+            for k, v in pairs(args[1]) do
               options[k] = v
             end
           end
+        else
+          table.insert(inputs, first)
+          if type(args[1]) == "table" then
+            options = args[1]
+          end
+        end
+      elseif #args == 1 then
+        local first = args[1]
+        if type(first) == "table" and getmetatable(first) == NodeHandle then
+          table.insert(inputs, first._id)
+        elseif type(first) == "string" then
+          options[1] = first
+        elseif type(first) == "table" then
+          options = first
         end
       end
       local node = graph:add_node({
@@ -95,6 +108,22 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
       end
       return NodeHandle.new(node.id, graph, extra_meta)
     end
+  end
+  if name == "moonstone" or name == "ballad.plugins.moonstone" then
+    self.registry = {
+      package = function(...)
+        return self:registry_package(...)
+      end,
+      source_package = function(...)
+        return self:registry_source_package(...)
+      end,
+      runtime = function(...)
+        return self:registry_runtime(...)
+      end,
+      external = function(...)
+        return self:registry_external(...)
+      end,
+    }
   end
   return self
 end
@@ -215,6 +244,24 @@ function PipelineContext:_core_node(plugin, method, inputs, opts, mutate_opts)
   return NodeHandle.new(node.id, self._graph)
 end
 
+---Import a plugin. Prefer `ballad.plugins.*`; string literal overloads are provided
+---for existing partituras such as `p:use("moonstone")`.
+---@overload fun(self: PipelineContext, plugin_ref: MoonstonePluginContract): MoonstonePlugin
+---@overload fun(self: PipelineContext, plugin_ref: LayoutPluginContract): LayoutPlugin
+---@overload fun(self: PipelineContext, plugin_ref: LovePluginContract): LovePlugin
+---@overload fun(self: PipelineContext, plugin_ref: RegistryPluginContract): RegistryPlugin
+---@overload fun(self: PipelineContext, plugin_ref: NvimPluginContract): NvimPlugin
+---@overload fun(self: PipelineContext, plugin_ref: RuntimePluginContract): RuntimePlugin
+---@overload fun(self: PipelineContext, plugin_ref: LuaPluginContract): LuaPlugin
+---@overload fun(self: PipelineContext, plugin_ref: MoonstoneInputPluginContract): MoonstoneInputPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'moonstone'|'ballad.plugins.moonstone'): MoonstonePlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'layout'|'ballad.plugins.layout'): LayoutPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'love'|'ballad.plugins.love'): LovePlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'registry'|'ballad.plugins.registry'): RegistryPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'nvim'|'ballad.plugins.nvim'): NvimPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'runtime'|'ballad.plugins.runtime'): RuntimePlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'lua'|'ballad.plugins.lua'): LuaPlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'input.moonstone'|'ballad.plugins.input.moonstone'): MoonstoneInputPlugin
 ---@param plugin_ref string|PluginContract
 ---@return PluginProxy
 function PipelineContext:use(plugin_ref)

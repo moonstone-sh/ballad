@@ -87,8 +87,12 @@ local function runtime_from_dependencies(root, env_rt)
 end
 
 local function query_current_runtime(root, moon_bin)
-  local cmd = "cd " .. process.quote(root) .. " && " .. process.quote(moon_bin or "moon") .. " runtime path --current --json 2>/dev/null"
+  local cmd = "cd " .. process.quote(root) .. " && " .. process.quote(moon_bin or "moon") .. " interpreter path --current --json 2>/dev/null"
   local output = process.capture(cmd)
+  if output == "" then
+    cmd = "cd " .. process.quote(root) .. " && " .. process.quote(moon_bin or "moon") .. " runtime path --current --json 2>/dev/null"
+    output = process.capture(cmd)
+  end
   if output == "" then return nil end
   local decoded = dkjson.decode(output)
   if type(decoded) ~= "table" then return nil end
@@ -167,6 +171,8 @@ local function find_moon_cli(opts)
   return "moon"
 end
 
+local moonstone_registry = require("ballad.moonstone_registry")
+
 return {
   name = "ballad.plugins.moonstone",
   version = "0.1.0",
@@ -185,6 +191,30 @@ return {
     },
     exec = {
       inputs = { "asset_set" },
+      outputs = { "asset_set" },
+      cacheable = false,
+      parallel_safe = true,
+    },
+    registry_package = {
+      inputs = { "asset_set" },
+      outputs = { "asset_set" },
+      cacheable = false,
+      parallel_safe = true,
+    },
+    registry_source_package = {
+      inputs = { "asset_set" },
+      outputs = { "asset_set" },
+      cacheable = false,
+      parallel_safe = true,
+    },
+    registry_runtime = {
+      inputs = {},
+      outputs = { "asset_set" },
+      cacheable = false,
+      parallel_safe = true,
+    },
+    registry_external = {
+      inputs = {},
       outputs = { "asset_set" },
       cacheable = false,
       parallel_safe = true,
@@ -403,5 +433,21 @@ return {
       description = opts.description or ("moon exec " .. command_str),
     }
     return ctx:native_task(task_opts)
+  end,
+
+  registry_package = function(ctx, inputs, opts)
+    return moonstone_registry.package(ctx, inputs, opts)
+  end,
+
+  registry_source_package = function(ctx, inputs, opts)
+    return moonstone_registry.source_package(ctx, inputs, opts)
+  end,
+
+  registry_runtime = function(ctx, inputs, opts)
+    return moonstone_registry.runtime(ctx, inputs, opts)
+  end,
+
+  registry_external = function(ctx, inputs, opts)
+    return moonstone_registry.external(ctx, inputs, opts)
   end,
 }

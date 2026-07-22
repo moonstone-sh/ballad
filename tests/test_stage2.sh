@@ -38,14 +38,13 @@ local ballad = require("ballad")
 return ballad.partiture(function(p)
   local moonstone = p:use(ballad.plugins.moonstone)
   local layout = p:use(ballad.plugins.layout)
-  local registry = p:use(ballad.plugins.registry)
 
   local project = moonstone.project({ root = "." })
   local app = layout.flat(project, {
     name = "ballad",
     entry = "src/main.lua",
   })
-  local registry_artifact = registry.package(app, {
+  local registry_artifact = moonstone.registry.package(app, {
     name = project.registry_name or "moonstone/ballad",
     version = project.version,
     target = "any",
@@ -168,11 +167,10 @@ local ballad = require("ballad")
 return ballad.partiture(function(p)
   local moonstone = p:use(ballad.plugins.moonstone)
   local love = p:use(ballad.plugins.love)
-  local registry = p:use(ballad.plugins.registry)
   local project = moonstone.project({ root = "." })
   local app = love.layout(project, { main = "main.lua", conf = "conf.lua" })
   local archive = love.pack(app, { out = "dist/my-love-game.love" })
-  local reg = registry.package(app, { name = "my-love-game", version = "0.1.0", runtime = "love@11.5" })
+  local reg = moonstone.registry.package(app, { name = "my-love-game", version = "0.1.0", runtime = "love@11.5" })
   p.sink.directory(app, { out = "dist/love-root" })
   p.sink.artifact(archive, { out = "dist/my-love-game.love" })
   p.sink.artifact(reg, { out = "dist/love-root/registry-artifact" })
@@ -237,11 +235,10 @@ local ballad = require("ballad")
 return ballad.partiture(function(p)
   local moonstone = p:use(ballad.plugins.moonstone)
   local nvim = p:use(ballad.plugins.nvim)
-  local registry = p:use(ballad.plugins.registry)
   local project = moonstone.project({ root = "." })
   local app = nvim.layout(project, { name = "my_plugin", entry = "plugin/my_plugin.lua" })
   p.sink.directory(app, { out = "dist/nvim-plugin" })
-  local reg = registry.package(app, { name = "my_plugin", version = "0.1.0", runtime = "nvim@0.10", lua_api = "5.1", entry = "plugin/my_plugin.lua" })
+  local reg = moonstone.registry.package(app, { name = "my_plugin", version = "0.1.0", runtime = "nvim@0.10", lua_api = "5.1", entry = "plugin/my_plugin.lua" })
   p.sink.artifact(reg, { out = "dist/nvim-plugin/registry-artifact" })
 end)
 EOF
@@ -367,11 +364,10 @@ local ballad = require("ballad")
 return ballad.partiture(function(p)
   local moonstone = p:use(ballad.plugins.moonstone)
   local nvim = p:use(ballad.plugins.nvim)
-  local registry = p:use(ballad.plugins.registry)
   local project = moonstone.project({ root = "." })
   local app = nvim.layout(project, { name = "my_plugin", entry = "lua/my_plugin/init.lua" })
   p.sink.directory(app, { out = "dist/nvim-plugin" })
-  local reg = registry.package(app, { name = "my_plugin", version = "0.1.0", entry = "lua/my_plugin/init.lua", out = "dist/nvim-deps-artifact" })
+  local reg = moonstone.registry.package(app, { name = "my_plugin", version = "0.1.0", entry = "lua/my_plugin/init.lua", out = "dist/nvim-deps-artifact" })
   p.sink.artifact(reg, { out = "dist/nvim-deps-artifact" })
 end)
 EOF

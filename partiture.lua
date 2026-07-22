@@ -3,7 +3,6 @@ local ballad = require("ballad")
 return ballad.partiture(function(p)
 	local moonstone = p:use(ballad.plugins.moonstone)
 	local layout = p:use(ballad.plugins.layout)
-	local registry = p:use(ballad.plugins.registry)
 
 	local project = moonstone.project({
 		root = ".",
@@ -16,7 +15,7 @@ return ballad.partiture(function(p)
 		interpreter = "luajit",
 	})
 
-	local registry_artifact = registry.package(app, {
+	local registry_artifact = moonstone.registry.package(app, {
 		name = project.registry_name or "moonstone/ballad",
 		version = project.version,
 		target = "any",

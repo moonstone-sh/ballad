@@ -23,6 +23,15 @@ function fs.write_file(file_path, content)
   file:close()
 end
 
+function fs.is_file(file_path)
+  local f = io.open(file_path, "rb")
+  if f then
+    f:close()
+    return true
+  end
+  return false
+end
+
 function fs.mkdir(dir_path)
   if not process.command_ok("mkdir -p " .. process.quote(dir_path)) then
     process.fail("cannot create directory " .. dir_path)
