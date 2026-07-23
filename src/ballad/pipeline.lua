@@ -238,7 +238,7 @@ function PipelineContext.new(graph, host, jobs)
     _metadata = {},
     _warnings = {},
     _assets = {},
-    _run_id = nil,
+    _run_id = os.date("%Y%m%d-%H%M%S"),
     _jobs = jobs or 1,
     _pending_tasks = {},
   }, PipelineContext)
@@ -1248,8 +1248,7 @@ function Pipeline:execute()
   local dkjson = require("dkjson")
   local cache = require("ballad.cache")
 
-  local run_id = os.date("%Y%m%d-%H%M%S")
-  self._context._run_id = run_id
+  local run_id = self._context._run_id
   local debug_dir = ".ballad/runs/" .. run_id
   fs.mkdir(debug_dir)
   local plan = self:plan(debug_dir)
