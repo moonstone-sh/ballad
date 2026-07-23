@@ -13,6 +13,10 @@ return ballad.partiture(function(p)
 		entry = "src/main.lua",
 		bin = "ballad",
 		interpreter = "luajit",
+		include = {
+			"moonstone.toml",
+			"src/**",
+		},
 	})
 
 	local registry_artifact = moonstone.registry.package(app, {

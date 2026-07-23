@@ -9,11 +9,20 @@ LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
 
 echo "=== Test 1: project metadata extraction ==="
+CI_PROBE_DIR=.ci/ballad-release-probe
+mkdir -p "$CI_PROBE_DIR"
+printf 'CI scaffolding must not ship.\n' > "$CI_PROBE_DIR/ignored.txt"
+trap 'rm -rf "$CI_PROBE_DIR"' EXIT INT TERM
 rm -rf dist/ballad
 luajit src/main.lua play partiture.lua
 PKG_VERSION=$(grep '^version' dist/ballad/registry-artifact/package.toml | head -1)
 echo "package.toml version line: $PKG_VERSION"
 echo "$PKG_VERSION" | grep -q '0.2.' || { echo "FAIL: version mismatch"; exit 1; }
+PACKAGE_ARCHIVE=$(find dist/ballad/registry-artifact -maxdepth 1 -type f -name 'ballad-*-any.tar.gz' -print -quit)
+if tar -tzf "$PACKAGE_ARCHIVE" | grep -Eq '^\./libexec/ballad/(\.ci|docs|fixtures|synthetic-playground|tests)/'; then
+  echo "FAIL: registry artifact contains non-runtime project files"
+  exit 1
+fi
 echo "PASS: version matches moonstone.toml"
 
 echo ""
