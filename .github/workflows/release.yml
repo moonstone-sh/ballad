@@ -1,0 +1,46 @@
+name: Validate and publish Ballad
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: moonstone-sh/moonstone
+          path: .ci/moonstone
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Build Moonstone CLI
+        working-directory: .ci/moonstone
+        run: |
+          zig build
+          echo "$GITHUB_WORKSPACE/.ci/moonstone/zig-out/bin" >> "$GITHUB_PATH"
+      - name: Synchronize Ballad
+        run: moon sync
+      - name: Validate Ballad and export itself
+        run: |
+          ./tests/test_layout_exec.sh
+          ./tests/test_native_closure.sh
+          ./tests/test_stage2.sh
+          moon run play
+      - name: Verify tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^version = "\(.*\)"$/\1/p' moonstone.toml | head -1)"
+      - name: Publish registry artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          MOONSTONE_TOKEN: ${{ secrets.MOONSTONE_TOKEN }}
+        run: |
+          test -n "$MOONSTONE_TOKEN"
+          dist/ballad/registry-artifact/publish.sh
