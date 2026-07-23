@@ -4,7 +4,7 @@ set -eu
 descriptor_path=${1:?usage: wait-for-publication.sh <package.toml>}
 registry_url=${MOONSTONE_REGISTRY_URL:-https://registry.moonstone.sh/registry/v0}
 registry_url=${registry_url%/}
-attempts=${MOONSTONE_PUBLICATION_ATTEMPTS:-30}
+attempts=${MOONSTONE_PUBLICATION_ATTEMPTS:-90}
 interval=${MOONSTONE_PUBLICATION_INTERVAL:-4}
 
 package_name=$(awk '
@@ -42,8 +42,8 @@ descriptor_matches_package() {
   awk -v expected_name="$package_name" -v expected_version="$package_version" '
     /^\[package\]$/ { in_package = 1; next }
     in_package && /^\[/ { exit }
-    in_package && /^name = / { value = $0; sub(/^name = "/, "", value); sub(/"$/, "", value); name = value }
-    in_package && /^version = / { value = $0; sub(/^version = "/, "", value); sub(/"$/, "", value); version = value }
+    in_package && name == "" && /^name = / { value = $0; sub(/^name = "/, "", value); sub(/"$/, "", value); name = value }
+    in_package && version == "" && /^version = / { value = $0; sub(/^version = "/, "", value); sub(/"$/, "", value); version = value }
     END { exit name == expected_name && version == expected_version ? 0 : 1 }
   '
 }
