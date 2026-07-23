@@ -27,6 +27,11 @@ jobs:
         with:
           repository: moonstone-sh/moonstone
           path: .ci/moonstone
+      - uses: actions/checkout@v4
+        with:
+          repository: moonstone-sh/ballad
+          ref: main
+          path: .ci/ballad-ci
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
@@ -47,7 +52,11 @@ jobs:
             set -eu
             ./tests/test_layout_exec.sh
             ./tests/test_native_closure.sh
-            ./tests/test_stage2.sh
+            if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+              BALLAD_ROOT="$GITHUB_WORKSPACE" .ci/ballad-ci/tests/test_stage2.sh
+            else
+              ./tests/test_stage2.sh
+            fi
             ./tests/test_watcher.sh
             ./tests/test_publish_verification.sh
           '

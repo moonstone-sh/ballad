@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+BALLAD_ROOT=${BALLAD_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
 BALLAD_LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 
 cd "$BALLAD_ROOT"
