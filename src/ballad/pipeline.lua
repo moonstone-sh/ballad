@@ -1251,6 +1251,18 @@ function Pipeline:execute()
   local run_id = self._context._run_id
   local debug_dir = ".ballad/runs/" .. run_id
   fs.mkdir(debug_dir)
+  local function write_debug_graph()
+    fs.write_file(path.join(debug_dir, "graph.json"), self._graph:to_json())
+  end
+  local function flush_pending_tasks()
+    local ok, err = pcall(function()
+      self._context:_flush_pending_tasks()
+    end)
+    if not ok then
+      write_debug_graph()
+      error(err, 0)
+    end
+  end
   local plan = self:plan(debug_dir)
   local order = plan.order
 
@@ -1327,11 +1339,12 @@ function Pipeline:execute()
 
     -- Flush pending parallel tasks before non-parallel-safe nodes
     if not node.parallel_safe then
-      self._context:_flush_pending_tasks()
+      flush_pending_tasks()
     end
 
     local handler = core_handler(node.plugin, node.method) or self._host:handler(node.plugin, node.method)
     if not handler then
+      write_debug_graph()
       error("No handler for " .. node.plugin .. "." .. node.method)
     end
 
@@ -1349,10 +1362,12 @@ function Pipeline:execute()
 
     local ok, result = pcall(handler, ctx, input_results, node.options)
     if not ok then
+      write_debug_graph()
       error("Pipeline node " .. node_id .. " (" .. node.plugin .. "." .. node.method .. ") failed: " .. tostring(result))
     end
 
     if result and getmetatable(result) ~= graph_mod.AssetSet then
+      write_debug_graph()
       error("Node " .. node_id .. " did not return an AssetSet")
     end
 
@@ -1361,7 +1376,7 @@ function Pipeline:execute()
     if result and result.assets then
       for _, asset in ipairs(result.assets) do
         if asset.metadata and asset.metadata.pending then
-          self._context:_flush_pending_tasks()
+          flush_pending_tasks()
           break
         end
       end
@@ -1387,9 +1402,9 @@ function Pipeline:execute()
   end
 
   -- Final flush of any remaining pending tasks
-  self._context:_flush_pending_tasks()
+  flush_pending_tasks()
 
-  fs.write_file(path.join(debug_dir, "graph.json"), self._graph:to_json())
+  write_debug_graph()
   print("Graph debug written to " .. debug_dir .. "/graph.json")
 
   local sink_results = {}
