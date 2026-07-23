@@ -1,7 +1,11 @@
 #!/usr/bin/env sh
 set -eu
 
-LUA_PATH=".moonstone/env/share/lua/5.1/?.lua;.moonstone/env/share/lua/5.1/?/init.lua;src/?.lua;src/?/init.lua;;"
+BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+BALLAD_LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+
+cd "$BALLAD_ROOT"
+LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
 
 echo "=== Test 1: project metadata extraction ==="
@@ -32,7 +36,7 @@ echo "PASS: file-graph.json and graph.json both exist with expected entries"
 
 echo ""
 echo "=== Test 3b: flat layout ==="
-cd /Users/extrordinaire/Workbench/user/ballad
+cd "$BALLAD_ROOT"
 cat > /tmp/test_flat.lua << 'LUAEOF'
 local ballad = require("ballad")
 return ballad.partiture(function(p)
@@ -186,23 +190,23 @@ EOF
 
 cd /tmp/love-test-project
 rm -rf dist
-LUA_PATH="/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?.lua;/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?/init.lua;/Users/extrordinaire/Workbench/user/ballad/src/?.lua;/Users/extrordinaire/Workbench/user/ballad/src/?/init.lua;;"
+LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
-luajit /Users/extrordinaire/Workbench/user/ballad/src/main.lua play partiture.lua > /tmp/love_test.log 2>&1
+luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/love_test.log 2>&1
 test -f dist/my-love-game.love || { echo "FAIL: .love archive not created"; exit 1; }
 unzip -l dist/my-love-game.love | grep -q "main.lua" || { echo "FAIL: main.lua not in .love archive"; exit 1; }
 unzip -l dist/my-love-game.love | grep -q "conf.lua" || { echo "FAIL: conf.lua not in .love archive"; exit 1; }
 unzip -l dist/my-love-game.love | grep -q "src/utils.lua" || { echo "FAIL: src/utils.lua not in .love archive"; exit 1; }
 grep -q "runtime = \"love@11.5\"" dist/love-root/registry-artifact/package.toml || { echo "FAIL: love runtime not in package.toml"; exit 1; }
 echo "PASS: love plugin layout and pack work correctly"
-cd /Users/extrordinaire/Workbench/user/ballad
+cd "$BALLAD_ROOT"
 
 echo ""
 echo "=== Test 7b: deterministic love archive ==="
 rm -rf /tmp/love-determinism
 mkdir -p /tmp/love-determinism
 cp -r /tmp/love-test-project/dist/love-root /tmp/love-determinism/source
-LUA_PATH="/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?.lua;/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?/init.lua;/Users/extrordinaire/Workbench/user/ballad/src/?.lua;/Users/extrordinaire/Workbench/user/ballad/src/?/init.lua;;"
+LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
 luajit -e 'local archive = require("ballad.archive"); local fs = require("ballad.fs"); local path = require("ballad.path"); local entries = {}; for _, f in ipairs(fs.list_files("/tmp/love-determinism/source")) do local rel = path.relative(f, "/tmp/love-determinism/source"); table.insert(entries, {path = rel, src = f}); end; archive.zip_store(entries, "/tmp/love-determinism/a.love", {deterministic = true}); archive.zip_store(entries, "/tmp/love-determinism/b.love", {deterministic = true});'
 HASH_A=$(b3sum --no-names /tmp/love-determinism/a.love)
@@ -252,16 +256,16 @@ EOF
 
 cd /tmp/nvim-test-project
 rm -rf dist
-LUA_PATH="/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?.lua;/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?/init.lua;/Users/extrordinaire/Workbench/user/ballad/src/?.lua;/Users/extrordinaire/Workbench/user/ballad/src/?/init.lua;;"
+LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
-luajit /Users/extrordinaire/Workbench/user/ballad/src/main.lua play partiture.lua > /tmp/nvim_test.log 2>&1
+luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/nvim_test.log 2>&1
 test -d dist/nvim-plugin/lua/my_plugin || { echo "FAIL: lua/my_plugin not in output"; exit 1; }
 test -f dist/nvim-plugin/plugin/my_plugin.lua || { echo "FAIL: plugin/my_plugin.lua not in output"; exit 1; }
 test -f dist/nvim-plugin/doc/my_plugin.txt || { echo "FAIL: doc/my_plugin.txt not in output"; exit 1; }
 grep -q "runtime = \"nvim@0.10\"" dist/nvim-plugin/registry-artifact/package.toml || { echo "FAIL: nvim runtime not in package.toml"; exit 1; }
 grep -q "lua_api = \"5.1\"" dist/nvim-plugin/registry-artifact/package.toml || { echo "FAIL: lua_api not correct in package.toml"; exit 1; }
 echo "PASS: nvim plugin layout works correctly"
-cd /Users/extrordinaire/Workbench/user/ballad
+cd "$BALLAD_ROOT"
 
 echo ""
 
@@ -269,15 +273,15 @@ echo ""
 echo "=== Test 9: cache layer ==="
 cd /tmp/love-test-project
 rm -rf dist .ballad/cache
-LUA_PATH="/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?.lua;/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?/init.lua;/Users/extrordinaire/Workbench/user/ballad/src/?.lua;/Users/extrordinaire/Workbench/user/ballad/src/?/init.lua;;"
+LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
-luajit /Users/extrordinaire/Workbench/user/ballad/src/main.lua play partiture.lua > /tmp/cache_run1.log 2>&1
+luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/cache_run1.log 2>&1
 if grep -q "Cache hit" /tmp/cache_run1.log; then
   echo "FAIL: first run should not have cache hits"
   exit 1
 fi
 test -d .ballad/cache/tasks || { echo "FAIL: cache directory not created"; exit 1; }
-luajit /Users/extrordinaire/Workbench/user/ballad/src/main.lua play partiture.lua > /tmp/cache_run2.log 2>&1
+luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/cache_run2.log 2>&1
 if ! grep -q "Cache hit" /tmp/cache_run2.log; then
   echo "FAIL: second run should have cache hits"
   exit 1
@@ -286,14 +290,14 @@ echo "PASS: cache skips tasks on second run"
 
 # Test: deleting output invalidates cache
 rm -f dist/my-love-game.love
-luajit /Users/extrordinaire/Workbench/user/ballad/src/main.lua play partiture.lua > /tmp/cache_run3.log 2>&1
+luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/cache_run3.log 2>&1
 if grep -q "Cache hit: node_5" /tmp/cache_run3.log; then
   echo "FAIL: deleted output should invalidate cache"
   exit 1
 fi
 echo "PASS: deleting output invalidates cache"
 
-cd /Users/extrordinaire/Workbench/user/ballad
+cd "$BALLAD_ROOT"
 echo "PASS: cache layer works correctly"
 
 
@@ -322,7 +326,7 @@ return ballad.partiture(function(p)
 end)
 LUAEOF
 rm -f /tmp/parallel_a.txt /tmp/parallel_b.txt
-luajit /Users/extrordinaire/Workbench/user/ballad/src/main.lua play /tmp/test_parallel.lua --jobs 2 > /tmp/parallel_test.log 2>&1
+luajit "$BALLAD_ROOT/src/main.lua" play /tmp/test_parallel.lua --jobs 2 > /tmp/parallel_test.log 2>&1
 test -f /tmp/parallel_a.txt || { echo "FAIL: parallel task A did not produce output"; exit 1; }
 test -f /tmp/parallel_b.txt || { echo "FAIL: parallel task B did not produce output"; exit 1; }
 grep -q "a" /tmp/parallel_a.txt || { echo "FAIL: parallel task A content wrong"; exit 1; }
@@ -381,9 +385,9 @@ EOF
 
 cd /tmp/nvim-deps-test-project
 rm -rf dist .ballad/cache
-LUA_PATH="/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?.lua;/Users/extrordinaire/Workbench/user/ballad/.moonstone/env/share/lua/5.1/?/init.lua;/Users/extrordinaire/Workbench/user/ballad/src/?.lua;/Users/extrordinaire/Workbench/user/ballad/src/?/init.lua;;"
+LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
-luajit /Users/extrordinaire/Workbench/user/ballad/src/main.lua play partiture.lua > /tmp/nvim_deps_test.log 2>&1
+luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/nvim_deps_test.log 2>&1
 
 # Check that the plugin was emitted
 if [ ! -d "dist/nvim-plugin/lua/my_plugin" ]; then
@@ -438,6 +442,6 @@ if ! grep -q "unresolved" /tmp/nvim_deps_test.log; then
 fi
 
 echo "PASS: dependency export policies work correctly"
-cd /Users/extrordinaire/Workbench/user/ballad
+cd "$BALLAD_ROOT"
 
 echo "=== All Stage 2 tests passed ==="
