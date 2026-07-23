@@ -67,6 +67,8 @@ jobs:
     needs: validate
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,9 +97,21 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
         run: test "${RELEASE_TAG#v}" = "$(sed -n 's/^version = "\(.*\)"$/\1/p' moonstone.toml | head -1)"
+      - name: Upload immutable GitHub release artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: |
+          set -eu
+          asset="$(find dist/ballad/registry-artifact -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
+          test -n "$asset"
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --title "Ballad $RELEASE_TAG" --generate-notes
+          gh release upload "$RELEASE_TAG" "$asset" --clobber
+          echo "MOONSTONE_ARTIFACT_URL=https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/$(basename "$asset")" >> "$GITHUB_ENV"
       - name: Publish registry artifact
         env:
           MOONSTONE_TOKEN: ${{ secrets.MOONSTONE_TOKEN }}
+          MOONSTONE_ARTIFACT_URL: ${{ env.MOONSTONE_ARTIFACT_URL }}
         run: |
           test -n "$MOONSTONE_TOKEN"
           dist/ballad/registry-artifact/publish.sh

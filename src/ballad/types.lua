@@ -363,6 +363,7 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field description string|nil Package description.
 ---@field readme string|nil Path to README file (defaults to README.md if present).
 ---@field readme_content string|nil Direct string content for README.md.
+---@field artifact_url string|nil External HTTPS URL used by `publish.sh` when `MOONSTONE_ARTIFACT_URL` is set; keeps release archives outside the registry blob store.
 
 ---@class RegistryRuntimeOptions
 ---@field name string|nil Runtime name, defaults to env `RUNTIME_NAME` or `lua`.

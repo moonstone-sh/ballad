@@ -469,9 +469,22 @@ registry.package = function(ctx, inputs, opts)
 		"#!/usr/bin/env sh",
 		"set -eu",
 		': "${MOONSTONE_TOKEN:?Set MOONSTONE_TOKEN to a write:registry API token}"',
-		'curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$(dirname "$0")/package.toml"' .. readme_field .. ' -F blob=@"$(dirname "$0")/'
+		'descriptor="$(dirname "$0")/package.toml"',
+		'if [ -n "${MOONSTONE_ARTIFACT_URL:-}" ]; then',
+		'  external_descriptor=$(mktemp)',
+		[=[  trap 'rm -f "$external_descriptor"' EXIT HUP INT TERM]=],
+		[=[  awk -v artifact_url="$MOONSTONE_ARTIFACT_URL" ']=],
+		[=[    BEGIN { replaced = 0 }]=],
+		[=[    !replaced && /^url = "/ { print "url = \"" artifact_url "\""; replaced = 1; next }]=],
+		[=[    { print }]=],
+		[=[  ' "$descriptor" > "$external_descriptor"]=],
+		'  descriptor="$external_descriptor"',
+		'  curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$descriptor"' .. readme_field .. ' "${MOONSTONE_PUBLISH_URL:-https://registry.moonstone.sh/api/registry/v0/publish}"',
+		"else",
+		'  curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$descriptor"' .. readme_field .. ' -F blob=@"$(dirname "$0")/'
 			.. tarball_name
 			.. '" "${MOONSTONE_PUBLISH_URL:-https://registry.moonstone.sh/api/registry/v0/publish}"',
+		"fi",
 	}
 	local publish_sh = table.concat(publish_lines, "\n") .. "\n"
 	local publish_path = path.join(artifact_dir, "publish.sh")
@@ -622,9 +635,22 @@ registry.source_package = function(ctx, inputs, opts)
 		"set -eu",
 		': "${MOONSTONE_TOKEN:=${MOONSTONE_PUBLISH_TOKEN:-}}"',
 		': "${MOONSTONE_TOKEN:?Set MOONSTONE_TOKEN or MOONSTONE_PUBLISH_TOKEN}"',
-		'curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$(dirname "$0")/package.toml"' .. readme_field .. ' -F blob=@"$(dirname "$0")/'
+		'descriptor="$(dirname "$0")/package.toml"',
+		'if [ -n "${MOONSTONE_ARTIFACT_URL:-}" ]; then',
+		'  external_descriptor=$(mktemp)',
+		[=[  trap 'rm -f "$external_descriptor"' EXIT HUP INT TERM]=],
+		[=[  awk -v artifact_url="$MOONSTONE_ARTIFACT_URL" ']=],
+		[=[    BEGIN { replaced = 0 }]=],
+		[=[    !replaced && /^url = "/ { print "url = \"" artifact_url "\""; replaced = 1; next }]=],
+		[=[    { print }]=],
+		[=[  ' "$descriptor" > "$external_descriptor"]=],
+		'  descriptor="$external_descriptor"',
+		'  curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$descriptor"' .. readme_field .. ' "${MOONSTONE_PUBLISH_URL:-https://registry.moonstone.sh/api/registry/v0/publish}"',
+		"else",
+		'  curl --fail-with-body -H "Authorization: Bearer $MOONSTONE_TOKEN" -F descriptor=@"$descriptor"' .. readme_field .. ' -F blob=@"$(dirname "$0")/'
 			.. tarball_name
 			.. '" "${MOONSTONE_PUBLISH_URL:-https://registry.moonstone.sh/api/registry/v0/publish}"',
+		"fi",
 	}
 	local publish_path = path.join(out_dir, "publish.sh")
 	fs.write_file(publish_path, table.concat(publish_lines, "\n") .. "\n")
