@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v* tag to validate and publish.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
       - uses: actions/checkout@v4
         with:
           repository: moonstone-sh/moonstone
@@ -48,10 +56,12 @@ jobs:
   publish:
     name: Publish Ballad registry artifact
     needs: validate
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
       - uses: actions/checkout@v4
         with:
           repository: moonstone-sh/moonstone
@@ -73,7 +83,9 @@ jobs:
           moon sync
           moon run play
       - name: Verify tag version
-        run: test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^version = "\(.*\)"$/\1/p' moonstone.toml | head -1)"
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: test "${RELEASE_TAG#v}" = "$(sed -n 's/^version = "\(.*\)"$/\1/p' moonstone.toml | head -1)"
       - name: Publish registry artifact
         env:
           MOONSTONE_TOKEN: ${{ secrets.MOONSTONE_TOKEN }}
