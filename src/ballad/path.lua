@@ -43,6 +43,8 @@ end
 function path.abi_directory(abi)
   local major, minor = abi:match("^lua(%d)(%d)$")
   if major and minor then return major .. "." .. minor end
+  major, minor = abi:match("^lua%-(%d)%.(%d)$")
+  if major and minor then return major .. "." .. minor end
   return abi
 end
 

@@ -457,6 +457,40 @@ function PipelineContext:native_task(opts)
   -- Resolve tool
   local resolved_tool = resolve_tool(tool)
   if not resolved_tool then
+    local task_id = self._graph:add_native_task({
+      kind = "native",
+      plugin = self._metadata._current_plugin or "unknown",
+      method = self._metadata._current_method or "unknown",
+      tool = tool,
+      args = args,
+      cwd = cwd,
+      env = env,
+      inputs = inputs,
+      outputs = outputs,
+      cacheable = cacheable,
+      parallel_safe = parallel_safe,
+      description = description,
+      status = "failed",
+      exit_code = nil,
+      stderr = "tool not found: " .. tool,
+      missing_outputs = {},
+    })
+    local run_id = self._run_id or os.date("%Y%m%d-%H%M%S")
+    local events_file = ".ballad/runs/" .. run_id .. "/events.ndjson"
+    local event_dir = require("ballad.path").dirname(events_file)
+    local fs = require("ballad.fs")
+    if not fs.is_dir(event_dir) then fs.mkdir(event_dir) end
+    local file = io.open(events_file, "a")
+    if file then
+      file:write(require("dkjson").encode({
+        type = "task_failed",
+        kind = "native",
+        id = task_id,
+        stderr = "tool not found: " .. tool,
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+      }) .. "\n")
+      file:close()
+    end
     error(
       "Native task failed: tool not found: " .. tool .. "\n\n" ..
       "Task: " .. (opts.id or description) .. "\n" ..

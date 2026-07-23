@@ -116,6 +116,10 @@ if luajit src/main.lua play /tmp/test_native_tool.lua > /tmp/native_tool.log 2>&
   exit 1
 fi
 grep -q "tool not found" /tmp/native_tool.log || { echo "FAIL: missing tool diagnostic not found"; exit 1; }
+LATEST_RUN=$(ls -1t .ballad/runs | head -1)
+test -f ".ballad/runs/$LATEST_RUN/graph.json" || { echo "FAIL: failed native task graph missing"; exit 1; }
+test -f ".ballad/runs/$LATEST_RUN/events.ndjson" || { echo "FAIL: failed native task events missing"; exit 1; }
+grep -q '"task_failed"' ".ballad/runs/$LATEST_RUN/events.ndjson" || { echo "FAIL: failed native task event missing"; exit 1; }
 echo "PASS: native task fails clearly for missing tool"
 
 echo ""
@@ -135,6 +139,9 @@ if luajit src/main.lua play /tmp/test_native_output.lua > /tmp/native_output.log
   exit 1
 fi
 grep -q "Missing outputs" /tmp/native_output.log || { echo "FAIL: missing output diagnostic not found"; exit 1; }
+LATEST_RUN=$(ls -1t .ballad/runs | head -1)
+test -f ".ballad/runs/$LATEST_RUN/graph.json" || { echo "FAIL: incomplete native task graph missing"; exit 1; }
+grep -q '"task_incomplete"' ".ballad/runs/$LATEST_RUN/events.ndjson" || { echo "FAIL: incomplete native task event missing"; exit 1; }
 echo "PASS: native task fails clearly for missing output"
 
 echo ""

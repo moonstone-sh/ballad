@@ -19,7 +19,7 @@ cat > "$WORK_DIR/.moonstone/env/env.toml" <<'TOML'
 [runtime]
 name = "luajit"
 version = "2.1.0"
-abi = "5.1"
+abi = "lua-5.1"
 TOML
 cat > "$WORK_DIR/generated/app/main.lua" <<'LUA'
 local helper = require("helper.message")
