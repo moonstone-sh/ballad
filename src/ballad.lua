@@ -12,6 +12,7 @@ return {
     moonstone = require("ballad.plugins.moonstone"),
     nvim = require("ballad.plugins.nvim"),
     runtime = require("ballad.plugins.runtime"),
+    watcher = require("ballad.plugins.watcher"),
     input = {
       moonstone = require("ballad.plugins.input.moonstone"),
     },

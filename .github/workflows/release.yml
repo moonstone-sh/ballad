@@ -34,6 +34,7 @@ jobs:
             ./tests/test_layout_exec.sh
             ./tests/test_native_closure.sh
             ./tests/test_stage2.sh
+            ./tests/test_watcher.sh
           '
           moon run play
       - name: Verify tag version

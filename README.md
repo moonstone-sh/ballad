@@ -133,6 +133,54 @@ package closure.
 
 See [docs/INPUTS_AND_OUTPUTS.md](docs/INPUTS_AND_OUTPUTS.md) for detailed documentation on `inputs`, `outputs`, caching, and terminal sinks (`p.sink.none`).
 
+## Development Watchers
+
+`ballad.plugins.watcher` is an opt-in, portable polling supervisor for
+partitures that need a long-running development loop. It owns the file
+snapshot, debounce, ordered reaction execution, and a POSIX shell trap that
+invokes the configured cleanup action on `INT`, `TERM`, or `HUP`.
+
+```lua
+local watcher = p:use(ballad.plugins.watcher)
+
+local sources = p.source.directory("src")
+local session = watcher.watch({
+  initial = {
+    label = "bootstrap",
+    inputs = { "src/**/*.lua", "assets/**", "build.zig" },
+    depends_on = { sources },
+    outputs = { "dist/server" },
+    effect = "scripts/guard.sh handoff && moon run build",
+  },
+  reactions = {
+    {
+      label = "application",
+      inputs = { "src/**/*.lua", "assets/**", "build.zig" },
+      depends_on = { sources },
+      outputs = { "dist/server" },
+      effect = "moon run build",
+    },
+  },
+  options = {
+    cleanup = "scripts/guard.sh cleanup || true",
+    interval = 0.5,
+    debounce = 0.15,
+  },
+})
+
+p.sink.none(session)
+```
+
+`initial` runs once when the watcher begins. Each reaction is declared in order.
+`inputs` selects its source surface,
+`depends_on` links the reaction to the upstream Ballad nodes that produce the
+relevant graph closure, and `outputs` records the refreshed surface in session
+metadata. `effect` is a shell command, intentionally declarative so a watcher
+session can be planned, logged, and supervised deterministically. Reactions run
+only after their debounced snapshot changes.
+Use `options = { once = true }` for an inspectable, non-daemon refresh in CI or
+smoke tests.
+
 ## LÖVE Example
 
 ```lua

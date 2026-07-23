@@ -13,6 +13,7 @@
 ---@field registry RegistryPluginContract Builds Moonstone registry descriptors/artifacts.
 ---@field nvim NvimPluginContract Builds Neovim plugin layouts and metadata.
 ---@field runtime RuntimePluginContract Bundles selected Moonstone runtimes.
+---@field watcher WatcherPluginContract Runs ordered, debounced, signal-aware file-watch reactions.
 ---@field lua LuaPluginContract Reserved Lua compile/check transforms.
 ---@field input BalladInputPlugins First-party input providers.
 
@@ -36,6 +37,8 @@
 ---@field __ballad_type? 'nvim'
 ---@class RuntimePluginContract: PluginContract
 ---@field __ballad_type? 'runtime'
+---@class WatcherPluginContract: PluginContract
+---@field __ballad_type? 'watcher'
 ---@class LuaPluginContract: PluginContract
 ---@field __ballad_type? 'lua'
 ---@class MoonstoneInputPluginContract: PluginContract
@@ -181,6 +184,7 @@
 ---@overload fun(self: PipelineContext, plugin_ref: RegistryPluginContract): RegistryPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: NvimPluginContract): NvimPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: RuntimePluginContract): RuntimePlugin
+---@overload fun(self: PipelineContext, plugin_ref: WatcherPluginContract): WatcherPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: LuaPluginContract): LuaPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: MoonstoneInputPluginContract): MoonstoneInputPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'moonstone'|'ballad.plugins.moonstone'): MoonstonePlugin
@@ -189,6 +193,7 @@
 ---@overload fun(self: PipelineContext, plugin_ref: 'registry'|'ballad.plugins.registry'): RegistryPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'nvim'|'ballad.plugins.nvim'): NvimPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'runtime'|'ballad.plugins.runtime'): RuntimePlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'watcher'|'ballad.plugins.watcher'): WatcherPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'lua'|'ballad.plugins.lua'): LuaPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'input.moonstone'|'ballad.plugins.input.moonstone'): MoonstoneInputPlugin
 if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
@@ -421,6 +426,33 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@class RuntimePlugin: PluginProxy
 ---@field wrap fun(input: NodeHandle, opts: RuntimeWrapOptions|nil): LayoutNode Add runtime assets, launcher scripts, and runtime metadata to a layout.
 ---@field bundle fun(input: NodeHandle, opts: RuntimeWrapOptions|nil): LayoutNode Compatibility alias for `wrap`.
+---@class WatcherPlugin: PluginProxy
+---@field watch fun(spec: WatcherSpec): WatcherSessionNode Run an ordered watcher session with one optional bootstrap and change-only reactions.
+
+---@class WatcherReaction
+---@field label string|nil Human-readable reaction label used in logs.
+---@field inputs string[] Non-empty portable glob list that determines when this reaction fires.
+---@field depends_on NodeHandle[]|nil Upstream Ballad node handles that must complete before the watcher session starts.
+---@field outputs string[]|nil Paths refreshed by the effect; retained in session metadata and graph debug output.
+---@field effect string Shell command run with `BALLAD_WATCH_REASON=change` after a matching debounced change.
+
+---@class WatcherInitialAction: WatcherReaction
+---@field effect string Shell command run once with `BALLAD_WATCH_REASON=initial` before snapshots begin.
+
+---@class WatcherOptions
+---@field cwd string|nil Working directory for bootstrap, reactions, and cleanup commands.
+---@field cleanup string|nil Shell command invoked exactly once by the POSIX supervisor on normal exit or `INT`, `TERM`, or `HUP`.
+---@field interval number|nil Poll interval in seconds; defaults to `0.5`.
+---@field debounce number|nil Quiet period before a changed reaction runs; defaults to `0.1`.
+---@field state_dir string|nil Directory for the generated supervised shell script; defaults to `.ballad/watchers`.
+---@field once boolean|nil Run only `initial` and return without starting a daemon; useful for CI and smoke tests.
+
+---@class WatcherSpec
+---@field initial WatcherInitialAction|nil Optional bootstrap action that runs exactly once before change detection.
+---@field reactions WatcherReaction[] Ordered non-empty change-only reaction list.
+---@field options WatcherOptions|nil Supervisor configuration.
+
+---@class WatcherSessionNode: NodeHandle
 
 ---@class LuaCompileOptions
 ---@field enabled boolean|nil Reserved.

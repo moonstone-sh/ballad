@@ -1,6 +1,6 @@
 [package]
 name = "moonstone/ballad"
-version = "0.2.21"
+version = "0.2.22"
 kind = "script"
 description = "Deterministic Lua project exporter and bundler for Moonstone"
 

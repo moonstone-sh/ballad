@@ -87,6 +87,33 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
       for key, value in pairs(options) do
         if key ~= "depends_on" then node_options[key] = value end
       end
+      if name == "ballad.plugins.watcher" and method_name == "watch" then
+        node_options.reactions = {}
+        for index, reaction in ipairs(options.reactions or {}) do
+          local reaction_options = {}
+          for key, value in pairs(reaction) do reaction_options[key] = value end
+          reaction_options.depends_on = {}
+          for _, target in ipairs(reaction.depends_on or {}) do
+            if getmetatable(target) ~= NodeHandle then
+              error("watcher reaction depends_on entries must be pipeline node handles")
+            end
+            table.insert(reaction_options.depends_on, target._id)
+          end
+          node_options.reactions[index] = reaction_options
+        end
+        if options.initial then
+          local initial_options = {}
+          for key, value in pairs(options.initial) do initial_options[key] = value end
+          initial_options.depends_on = {}
+          for _, target in ipairs(options.initial.depends_on or {}) do
+            if getmetatable(target) ~= NodeHandle then
+              error("watcher initial depends_on entries must be pipeline node handles")
+            end
+            table.insert(initial_options.depends_on, target._id)
+          end
+          node_options.initial = initial_options
+        end
+      end
       local node = graph:add_node({
         plugin = name,
         method = method_name,
@@ -113,6 +140,27 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
           table.insert(node.inputs, handle._id)
           graph.edges[handle._id] = graph.edges[handle._id] or {}
           table.insert(graph.edges[handle._id], node.id)
+        end
+      end
+      if name == "ballad.plugins.watcher" and method_name == "watch" then
+        local watcher_dependencies = {}
+        if options.initial then table.insert(watcher_dependencies, options.initial) end
+        for _, reaction in ipairs(options.reactions or {}) do table.insert(watcher_dependencies, reaction) end
+        for _, reaction in ipairs(watcher_dependencies) do
+          for _, handle in ipairs(reaction.depends_on or {}) do
+            if getmetatable(handle) ~= NodeHandle then
+              error("watcher reaction depends_on entries must be pipeline node handles")
+            end
+            local present = false
+            for _, input_id in ipairs(node.inputs) do
+              if input_id == handle._id then present = true; break end
+            end
+            if not present then
+              table.insert(node.inputs, handle._id)
+              graph.edges[handle._id] = graph.edges[handle._id] or {}
+              table.insert(graph.edges[handle._id], node.id)
+            end
+          end
         end
       end
       local extra_meta = nil
@@ -271,6 +319,7 @@ end
 ---@overload fun(self: PipelineContext, plugin_ref: RegistryPluginContract): RegistryPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: NvimPluginContract): NvimPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: RuntimePluginContract): RuntimePlugin
+---@overload fun(self: PipelineContext, plugin_ref: WatcherPluginContract): WatcherPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: LuaPluginContract): LuaPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: MoonstoneInputPluginContract): MoonstoneInputPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'moonstone'|'ballad.plugins.moonstone'): MoonstonePlugin
@@ -279,6 +328,7 @@ end
 ---@overload fun(self: PipelineContext, plugin_ref: 'registry'|'ballad.plugins.registry'): RegistryPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'nvim'|'ballad.plugins.nvim'): NvimPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'runtime'|'ballad.plugins.runtime'): RuntimePlugin
+---@overload fun(self: PipelineContext, plugin_ref: 'watcher'|'ballad.plugins.watcher'): WatcherPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'lua'|'ballad.plugins.lua'): LuaPlugin
 ---@overload fun(self: PipelineContext, plugin_ref: 'input.moonstone'|'ballad.plugins.input.moonstone'): MoonstoneInputPlugin
 ---@param plugin_ref string|PluginContract
