@@ -222,7 +222,14 @@ local source_artifact = moonstone.registry.source_package(project, {
   name = "user/meteorite",
   version = project.version,
   kind = "lib",
-  include = { "moonstone.toml", "build.zig", "src/**", "native/**", "README.md" },
+  include = {
+    "moonstone.toml",
+    "build.zig",
+    "src/**",
+    "native/**",
+    "README.md",
+    "REGISTRY_README.md",
+  },
   exclude = { ".moonstone/**", ".ballad/**", "zig-cache/**", "zig-out/**", ".git/**" },
   materialize = {
     type = "command",
@@ -240,5 +247,23 @@ local source_artifact = moonstone.registry.source_package(project, {
 
 p.sink.artifact(source_artifact, { out = "dist/registry/meteorite" })
 ```
+
+### Repository and Registry READMEs
+
+Keep `README.md` for people visiting the source repository: architecture,
+contributor workflow, benchmarks, and development notes. Add
+`REGISTRY_README.md` for the install-and-use guide shown to package consumers.
+
+For every registry package shape, Ballad resolves README content in this order:
+
+1. `readme_content` passed to the package call.
+2. An explicit `readme = "..."` path passed to the package call.
+3. A `readme` path declared in `[package]` in `moonstone.toml`.
+4. `REGISTRY_README.md` at the project root.
+5. `README.md` at the project root.
+
+The generated package still writes the selected content as `README.md` and
+uploads it through the registry protocol. The split changes authoring intent,
+not the registry format.
 
 The source archive is emitted as `name-version-source.tar.zst`; `zstd` must be available in `PATH`.

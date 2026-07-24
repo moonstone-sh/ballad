@@ -344,7 +344,8 @@ return {
       roles = opts.roles or { "runtime" },
       moon = opts.moon or opts.moon_bin or "moon",
     })
-    -- Resolve an optional README path (e.g. readme = "./README.md").
+    -- An explicit package README wins. Otherwise prefer a registry-facing
+    -- README, then use the repository README as a useful fallback.
     local readme_path = nil
     local readme_content = nil
     local declared_readme = pkg.readme
@@ -354,9 +355,16 @@ return {
         readme_path = declared_readme
         readme_content = fs.read_file(candidate)
       end
-    elseif fs.read_file(path.join(loaded.root, "README.md")) then
-      readme_path = "README.md"
-      readme_content = fs.read_file(path.join(loaded.root, "README.md"))
+    else
+      for _, candidate_name in ipairs({ "REGISTRY_README.md", "README.md" }) do
+        local candidate = path.join(loaded.root, candidate_name)
+        local content = fs.read_file(candidate)
+        if content then
+          readme_path = candidate_name
+          readme_content = content
+          break
+        end
+      end
     end
     return {
       name = name,
@@ -449,6 +457,7 @@ return {
         abi = loaded.env and loaded.env.runtime and loaded.env.runtime.abi or "5.1",
         dependencies = dep_roles,
         readme = (pkg.readme and pkg.readme ~= "") and pkg.readme
+          or (fs.read_file(path.join(loaded.root, "REGISTRY_README.md")) and "REGISTRY_README.md")
           or (fs.read_file(path.join(loaded.root, "README.md")) and "README.md" or nil),
       },
     })

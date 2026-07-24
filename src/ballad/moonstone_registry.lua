@@ -7,7 +7,7 @@
 ---@field target? string target platform or "any" (default "any")
 ---@field runtime? string runtime dependency constraint (e.g. "moonstone/luajit@2.1.0")
 ---@field lua_abi? string target Lua ABI (e.g. "5.1" or "lua-5.1")
----@field readme? string relative path to README file (defaults to auto-detecting README.md in project root)
+---@field readme? string relative path to README file (defaults to REGISTRY_README.md, then README.md in project root)
 ---@field readme_content? string raw README markdown content string
 ---@field out? string output directory path for the registry artifact
 
@@ -18,7 +18,7 @@
 ---@field description? string package description
 ---@field include? string[] list of glob patterns for files to include in the source archive
 ---@field exclude? string[] list of glob patterns for files to exclude from the source archive
----@field readme? string relative path to README file (defaults to auto-detecting README.md in project root)
+---@field readme? string relative path to README file (defaults to REGISTRY_README.md, then README.md in project root)
 ---@field readme_content? string raw README markdown content string
 ---@field materialize? table materialization recipe spec (type = "command", command = "...", collect = {...})
 ---@field out? string output directory path for the registry artifact
@@ -28,7 +28,7 @@
 ---@field version? string package version string (e.g. "5.4.7")
 ---@field target? string target platform (e.g. "macos-aarch64")
 ---@field description? string package description
----@field readme? string path to README file (defaults to auto-detecting README.md in project root)
+---@field readme? string path to README file (defaults to REGISTRY_README.md, then README.md in project root)
 ---@field readme_content? string raw README markdown content string
 ---@field out? string output directory path for the registry artifact
 
@@ -82,6 +82,12 @@ local function toml_quote(value)
 	return '"' .. tostring(value):gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
 end
 
+local function read_readme_file(project_root, readme_rel)
+	if type(readme_rel) ~= "string" or readme_rel == "" then return nil end
+	local candidate = path.is_absolute(readme_rel) and readme_rel or path.join(project_root, readme_rel)
+	return fs.read_file(candidate)
+end
+
 local function resolve_readme_content(inputs, opts)
 	if opts and type(opts.readme_content) == "string" and opts.readme_content ~= "" then
 		return opts.readme_content
@@ -101,14 +107,19 @@ local function resolve_readme_content(inputs, opts)
 		end
 	end
 	local project_root = (project_asset and project_asset.metadata and project_asset.metadata.root) or "."
-	local readme_rel = (opts and type(opts.readme) == "string" and opts.readme ~= "") and opts.readme
-		or (project_asset and project_asset.metadata and project_asset.metadata.readme)
-		or "README.md"
-	if readme_rel and readme_rel ~= "" then
-		local candidate = path.is_absolute(readme_rel) and readme_rel or path.join(project_root, readme_rel)
-		local content = fs.read_file(candidate)
-		if content then
-			return content
+	local explicit_readme = opts and opts.readme
+	if type(explicit_readme) == "string" and explicit_readme ~= "" then
+		return read_readme_file(project_root, explicit_readme)
+	end
+
+	local declared_readme = project_asset and project_asset.metadata and project_asset.metadata.readme
+	local declared_content = read_readme_file(project_root, declared_readme)
+	if declared_content then return declared_content end
+
+	for _, fallback in ipairs({ "REGISTRY_README.md", "README.md" }) do
+		if fallback ~= declared_readme then
+			local content = read_readme_file(project_root, fallback)
+			if content then return content end
 		end
 	end
 	return nil
