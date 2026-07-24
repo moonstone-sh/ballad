@@ -70,6 +70,27 @@ grep -q 'hands-on package guide' "$OUT/README.md" || { echo "FAIL: dedicated reg
 ! grep -q 'Contributor-facing repository documentation' "$OUT/README.md" || { echo "FAIL: repository README was selected instead"; exit 1; }
 grep -q -- '-F readme=@' "$OUT/publish.sh" || { echo "FAIL: publish.sh missing readme upload"; exit 1; }
 
+FAKE_BIN="$WORK_DIR/fake-bin"
+CAPTURED_DESCRIPTOR="$WORK_DIR/external-package.toml"
+mkdir -p "$FAKE_BIN"
+cat > "$FAKE_BIN/curl" <<'SH'
+#!/usr/bin/env sh
+for arg in "$@"; do
+  case "$arg" in
+    descriptor=@*) cp "${arg#descriptor=@}" "$CAPTURED_DESCRIPTOR" ;;
+  esac
+done
+SH
+chmod +x "$FAKE_BIN/curl"
+PATH="$FAKE_BIN:$PATH" \
+  CAPTURED_DESCRIPTOR="$CAPTURED_DESCRIPTOR" \
+  MOONSTONE_TOKEN=test-token \
+  MOONSTONE_ARTIFACT_URL="https://github.com/example/readme-demo/releases/download/v0.4.2/readme-demo.tar.zst" \
+  MOONSTONE_PUBLISH_URL="https://registry.example.test/publish" \
+  "$OUT/publish.sh"
+grep -q '^url = "https://github.com/example/readme-demo"$' "$CAPTURED_DESCRIPTOR" || { echo "FAIL: publish rewrite changed origin URL"; exit 1; }
+grep -q '^url = "https://github.com/example/readme-demo/releases/download/v0.4.2/readme-demo.tar.zst"$' "$CAPTURED_DESCRIPTOR" || { echo "FAIL: publish rewrite did not change artifact URL"; exit 1; }
+
 cat > "$WORK_DIR/explicit-partiture.lua" <<'LUA'
 local ballad = require("ballad")
 
