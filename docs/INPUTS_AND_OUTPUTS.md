@@ -6,6 +6,32 @@ This document explains the semantics of **`inputs`**, **`outputs`**, **caching**
 
 ---
 
+## Watcher Source Handles
+
+`ballad.plugins.watcher` uses source node handles instead of raw glob strings:
+
+```lua
+local watcher = p:use(ballad.plugins.watcher)
+local lua_sources = p.source.files({ "**/*.lua" }, { root = "src" })
+
+local session = watcher.watch({
+  reactions = {
+    {
+      watch = { lua_sources },
+      outputs = { "dist/app" },
+      effect = "moon run build",
+    },
+  },
+})
+```
+
+Each handle in `watch` becomes an input edge of the watcher node. The watcher
+derives its polling patterns from the referenced source nodes, keeping the
+runtime subscription and planned graph closure in sync. Use `depends_on` only
+for genuine task ordering, not as a change trigger.
+
+---
+
 ## Overview
 
 When building projects that require pre-export compilation (such as transpiling MoonScript `src/*.moon` to `dist/src/*.lua`, compiling C/Zig extensions, or running asset generators), native tasks define how subprocesses interact with Ballad's graph and cache system.

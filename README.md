@@ -143,20 +143,19 @@ invokes the configured cleanup action on `INT`, `TERM`, or `HUP`.
 ```lua
 local watcher = p:use(ballad.plugins.watcher)
 
-local sources = p.source.directory("src")
+local application = p.source.files({ "**/*.lua" }, { root = "src" })
+local assets = p.source.directory("assets")
+local build_config = p.source.files({ "build.zig" }, { root = "." })
 local session = watcher.watch({
   initial = {
     label = "bootstrap",
-    inputs = { "src/**/*.lua", "assets/**", "build.zig" },
-    depends_on = { sources },
     outputs = { "dist/server" },
     effect = "scripts/guard.sh handoff && moon run build",
   },
   reactions = {
     {
       label = "application",
-      inputs = { "src/**/*.lua", "assets/**", "build.zig" },
-      depends_on = { sources },
+      watch = { application, assets, build_config },
       outputs = { "dist/server" },
       effect = "moon run build",
     },
@@ -172,12 +171,14 @@ p.sink.none(session)
 ```
 
 `initial` runs once when the watcher begins. Each reaction is declared in order.
-`inputs` selects its source surface,
-`depends_on` links the reaction to the upstream Ballad nodes that produce the
-relevant graph closure, and `outputs` records the refreshed surface in session
-metadata. `effect` is a shell command, intentionally declarative so a watcher
-session can be planned, logged, and supervised deterministically. Reactions run
-only after their debounced snapshot changes.
+`watch` accepts source node handles and defines both the source surface and the
+watcher node's graph inputs. Ballad derives polling patterns from those source
+nodes, so the graph and daemon subscribe to the same closure. `outputs` records
+the refreshed surface in session metadata. `effect` is a shell command,
+intentionally declarative so a watcher session can be planned, logged, and
+supervised deterministically. Reactions run only after their debounced snapshot
+changes. Use top-level `depends_on` only for genuine task ordering; it does not
+mean “rerun when this source changes.”
 Use `options = { once = true }` for an inspectable, non-daemon refresh in CI or
 smoke tests.
 

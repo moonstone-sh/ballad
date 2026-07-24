@@ -10,20 +10,17 @@ local ballad = require("ballad")
 
 return ballad.partiture(function(p)
   local watcher = p:use(ballad.plugins.watcher)
-  local sources = p.source.directory("src")
+  local sources = p.source.files({ "**/*.lua" }, { root = "src" })
   local session = watcher.watch({
     initial = {
       label = "bootstrap",
-      inputs = { "src/**/*.lua" },
-      depends_on = { sources },
       outputs = { "watched.txt" },
       effect = "test \"$BALLAD_WATCH_REASON\" = initial && printf ready > watched.txt",
     },
     reactions = {
       {
         label = "lua sources",
-        inputs = { "src/**/*.lua" },
-        depends_on = { sources },
+        watch = { sources },
         outputs = { "watched.txt" },
         effect = "printf changed > watched.txt",
       },
@@ -42,4 +39,9 @@ printf 'return true\n' > src/main.lua
   exit 1
 }
 test "$(cat watched.txt)" = "ready"
-echo "PASS: watcher reactions once mode"
+GRAPH=$(find .ballad/runs -name graph.json -type f | head -n 1)
+test -n "$GRAPH"
+grep -q '"watch":\["node_1"\]' "$GRAPH"
+grep -q '"inputs":\["node_1"\]' "$GRAPH"
+
+echo "PASS: watcher source handles become graph inputs"

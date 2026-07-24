@@ -6,7 +6,7 @@ local process = require("ballad.process")
 ---@class WatcherPluginContract
 local watcher = {
   name = "ballad.plugins.watcher",
-  version = "0.1.0",
+  version = "0.1.1",
   methods = {
     watch = {
       inputs = {},
@@ -40,48 +40,83 @@ local function watch_root(glob)
   return prefix ~= "" and prefix or "."
 end
 
-local function dependency_ids(dependencies)
-  local ids = {}
-  for _, dependency in ipairs(dependencies or {}) do
-    if type(dependency) == "string" then
-      ids[#ids + 1] = dependency
-    elseif type(dependency) == "table" and type(dependency.id) == "function" then
-      ids[#ids + 1] = dependency:id()
-    else
-      error("watcher reaction depends_on entries must be Ballad node handles")
-    end
+local function append_unique(values, seen, value)
+  if not seen[value] then
+    values[#values + 1] = value
+    seen[value] = true
   end
-  table.sort(ids)
-  return ids
 end
 
-local function normalize_reaction(reaction, index, subject)
-  if type(reaction) ~= "table" then error(subject .. " " .. index .. " must be a table") end
-  if type(reaction.inputs) ~= "table" or #reaction.inputs == 0 then
-    error(subject .. " " .. index .. " requires a non-empty inputs array")
+local function root_pattern(root, pattern)
+  root = root or "."
+  if root == "." or root == "" then return pattern end
+  return root:gsub("/+$", "") .. "/" .. pattern
+end
+
+local function portable_patterns(pattern)
+  local values = { pattern }
+  local simplified = pattern:gsub("%*%*/", "")
+  if simplified ~= pattern and simplified ~= "" then values[#values + 1] = simplified end
+  return values
+end
+
+local function watch_inputs(ctx, watch, subject)
+  local inputs, seen = {}, {}
+  for _, node_id in ipairs(watch) do
+    local node = ctx.graph.nodes[node_id]
+    if not node or node.plugin ~= "ballad.core.source" then
+      error(subject .. " watch entries must reference Ballad source nodes")
+    end
+    if node.method == "directory" then
+      append_unique(inputs, seen, root_pattern(node.options.path or node.options.root or ".", "**"))
+    elseif node.method == "files" then
+      local root = node.options.root or "."
+      local patterns = type(node.options.patterns) == "table" and node.options.patterns or { node.options.patterns }
+      for _, pattern in ipairs(patterns) do
+        for _, expanded in ipairs(portable_patterns(pattern)) do
+          append_unique(inputs, seen, root_pattern(root, expanded))
+        end
+      end
+    else
+      error(subject .. " watch entries must reference directory or files source nodes")
+    end
   end
-  for _, input in ipairs(reaction.inputs) do assert_glob(input, subject .. " input") end
+  return inputs
+end
+
+local function normalize_reaction(ctx, reaction, index, subject)
+  if type(reaction) ~= "table" then error(subject .. " " .. index .. " must be a table") end
+  if type(reaction.watch) ~= "table" or #reaction.watch == 0 then
+    error(subject .. " " .. index .. " requires a non-empty watch array")
+  end
+  for _, node_id in ipairs(reaction.watch) do
+    if type(node_id) ~= "string" or node_id == "" then
+      error(subject .. " " .. index .. " watch entries must be source node ids")
+    end
+  end
   local effect = reaction.effect or reaction.command
   if type(effect) ~= "string" or effect == "" then
     error(subject .. " " .. index .. " requires an effect command string")
   end
+  local inputs = watch_inputs(ctx, reaction.watch, subject .. " " .. index)
+  for _, input in ipairs(inputs) do assert_glob(input, subject .. " input") end
   return {
       label = reaction.label or (subject .. "-" .. index),
-      inputs = reaction.inputs,
+      inputs = inputs,
       effect = effect,
-      depends_on = dependency_ids(reaction.depends_on),
+      watch = reaction.watch,
       outputs = reaction.outputs or {},
   }
 end
 
-local function normalize_reactions(spec)
+local function normalize_reactions(ctx, spec)
   if type(spec) ~= "table" or type(spec.reactions) ~= "table" or #spec.reactions == 0 then
     error("watcher.watch requires a non-empty reactions array")
   end
 
   local reactions = {}
   for index, reaction in ipairs(spec.reactions) do
-    reactions[#reactions + 1] = normalize_reaction(reaction, index, "watcher reaction")
+    reactions[#reactions + 1] = normalize_reaction(ctx, reaction, index, "watcher reaction")
   end
   return reactions
 end
@@ -174,9 +209,20 @@ end
 ---@return AssetSet
 function watcher.watch(ctx, _, spec)
   spec = spec or {}
-  local reactions = normalize_reactions(spec)
+  local reactions = normalize_reactions(ctx, spec)
   local options = spec.options or {}
-  local initial = spec.initial and normalize_reaction(spec.initial, 1, "watcher initial") or nil
+  local initial = nil
+  if spec.initial then
+    local effect = spec.initial.effect or spec.initial.command
+    if type(effect) ~= "string" or effect == "" then
+      ctx.fail("watcher initial requires an effect command string")
+    end
+    initial = {
+      label = spec.initial.label or "watcher initial",
+      effect = effect,
+      outputs = spec.initial.outputs or {},
+    }
+  end
 
   if options.once then
     if initial then

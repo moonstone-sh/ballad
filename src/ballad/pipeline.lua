@@ -87,30 +87,25 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
       for key, value in pairs(options) do
         if key ~= "depends_on" then node_options[key] = value end
       end
+      local watcher_watch_ids = {}
       if name == "ballad.plugins.watcher" and method_name == "watch" then
         node_options.reactions = {}
         for index, reaction in ipairs(options.reactions or {}) do
           local reaction_options = {}
           for key, value in pairs(reaction) do reaction_options[key] = value end
-          reaction_options.depends_on = {}
-          for _, target in ipairs(reaction.depends_on or {}) do
+          reaction_options.watch = {}
+          for _, target in ipairs(reaction.watch or {}) do
             if getmetatable(target) ~= NodeHandle then
-              error("watcher reaction depends_on entries must be pipeline node handles")
+              error("watcher reaction watch entries must be pipeline node handles")
             end
-            table.insert(reaction_options.depends_on, target._id)
+            table.insert(reaction_options.watch, target._id)
+            table.insert(watcher_watch_ids, target._id)
           end
           node_options.reactions[index] = reaction_options
         end
         if options.initial then
           local initial_options = {}
           for key, value in pairs(options.initial) do initial_options[key] = value end
-          initial_options.depends_on = {}
-          for _, target in ipairs(options.initial.depends_on or {}) do
-            if getmetatable(target) ~= NodeHandle then
-              error("watcher initial depends_on entries must be pipeline node handles")
-            end
-            table.insert(initial_options.depends_on, target._id)
-          end
           node_options.initial = initial_options
         end
       end
@@ -143,23 +138,15 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
         end
       end
       if name == "ballad.plugins.watcher" and method_name == "watch" then
-        local watcher_dependencies = {}
-        if options.initial then table.insert(watcher_dependencies, options.initial) end
-        for _, reaction in ipairs(options.reactions or {}) do table.insert(watcher_dependencies, reaction) end
-        for _, reaction in ipairs(watcher_dependencies) do
-          for _, handle in ipairs(reaction.depends_on or {}) do
-            if getmetatable(handle) ~= NodeHandle then
-              error("watcher reaction depends_on entries must be pipeline node handles")
-            end
-            local present = false
-            for _, input_id in ipairs(node.inputs) do
-              if input_id == handle._id then present = true; break end
-            end
-            if not present then
-              table.insert(node.inputs, handle._id)
-              graph.edges[handle._id] = graph.edges[handle._id] or {}
-              table.insert(graph.edges[handle._id], node.id)
-            end
+        for _, input_id in ipairs(watcher_watch_ids) do
+          local present = false
+          for _, existing_id in ipairs(node.inputs) do
+            if existing_id == input_id then present = true; break end
+          end
+          if not present then
+            table.insert(node.inputs, input_id)
+            graph.edges[input_id] = graph.edges[input_id] or {}
+            table.insert(graph.edges[input_id], node.id)
           end
         end
       end

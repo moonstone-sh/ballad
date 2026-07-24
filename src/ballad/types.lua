@@ -432,13 +432,14 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 
 ---@class WatcherReaction
 ---@field label string|nil Human-readable reaction label used in logs.
----@field inputs string[] Non-empty portable glob list that determines when this reaction fires.
----@field depends_on NodeHandle[]|nil Upstream Ballad node handles that must complete before the watcher session starts.
+---@field watch NodeHandle[] Non-empty source node handles that determine when this reaction fires.
 ---@field outputs string[]|nil Paths refreshed by the effect; retained in session metadata and graph debug output.
 ---@field effect string Shell command run with `BALLAD_WATCH_REASON=change` after a matching debounced change.
 
----@class WatcherInitialAction: WatcherReaction
+---@class WatcherInitialAction
+---@field label string|nil Human-readable bootstrap label used in logs.
 ---@field effect string Shell command run once with `BALLAD_WATCH_REASON=initial` before snapshots begin.
+---@field outputs string[]|nil Paths refreshed by the bootstrap; retained in session metadata and graph debug output.
 
 ---@class WatcherOptions
 ---@field cwd string|nil Working directory for bootstrap, reactions, and cleanup commands.
