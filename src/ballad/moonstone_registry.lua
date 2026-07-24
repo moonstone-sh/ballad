@@ -9,6 +9,7 @@
 ---@field lua_abi? string target Lua ABI (e.g. "5.1" or "lua-5.1")
 ---@field readme? string relative path to README file (defaults to REGISTRY_README.md, then README.md in project root)
 ---@field readme_content? string raw README markdown content string
+---@field origin? table immutable source provenance override ({ kind = "git", url = "https://...", revision? = "..." })
 ---@field out? string output directory path for the registry artifact
 
 ---@class RegistrySourcePackageOpts
@@ -20,6 +21,7 @@
 ---@field exclude? string[] list of glob patterns for files to exclude from the source archive
 ---@field readme? string relative path to README file (defaults to REGISTRY_README.md, then README.md in project root)
 ---@field readme_content? string raw README markdown content string
+---@field origin? table immutable source provenance override ({ kind = "git", url = "https://...", revision? = "..." })
 ---@field materialize? table materialization recipe spec (type = "command", command = "...", collect = {...})
 ---@field out? string output directory path for the registry artifact
 
@@ -38,6 +40,7 @@ local graph = require("ballad.graph")
 local fs = require("ballad.fs")
 local path = require("ballad.path")
 local process = require("ballad.process")
+local toml = require("ballad.toml")
 
 registry.name = "ballad.moonstone_registry"
 registry.version = "0.1.0"
@@ -125,6 +128,52 @@ local function resolve_readme_content(inputs, opts)
 		end
 	end
 	return nil
+end
+
+local function project_asset_from_inputs(inputs)
+	for _, input in ipairs(inputs or {}) do
+		for _, asset in ipairs(input.assets or {}) do
+			if asset.kind == "project" then return asset end
+		end
+	end
+	return nil
+end
+
+local function resolve_origin(inputs, opts)
+	local project_asset = project_asset_from_inputs(inputs)
+	local project_root = project_asset and project_asset.metadata and project_asset.metadata.root or (opts and opts.root) or "."
+	local origin = (opts and opts.origin) or (project_asset and project_asset.metadata and project_asset.metadata.origin)
+	if not origin then
+		local manifest = fs.read_file(path.join(project_root, "moonstone.toml"))
+		if manifest then
+			local ok, parsed = pcall(toml.parse, manifest)
+			if ok and type(parsed.origin) == "table" then origin = parsed.origin end
+		end
+	end
+	if type(origin) ~= "table" or type(origin.kind) ~= "string" or type(origin.url) ~= "string" then return nil end
+
+	local resolved = { kind = origin.kind, url = origin.url }
+	if type(origin.revision) == "string" and origin.revision ~= "" then
+		resolved.revision = origin.revision
+	elseif origin.kind == "git" then
+		local check = "git -C " .. process.quote(project_root) .. " rev-parse --is-inside-work-tree >/dev/null 2>&1"
+		if process.command_ok(check) then
+			local revision = process.capture("git -C " .. process.quote(project_root) .. " rev-parse HEAD")
+			if revision ~= "" then resolved.revision = revision end
+		end
+	end
+	if type(origin.hash) == "string" and origin.hash ~= "" then resolved.hash = origin.hash end
+	return resolved
+end
+
+local function append_origin(lines, origin)
+	if not origin then return end
+	table.insert(lines, "")
+	table.insert(lines, "[origin]")
+	table.insert(lines, "kind = " .. toml_quote(origin.kind))
+	table.insert(lines, "url = " .. toml_quote(origin.url))
+	if origin.revision then table.insert(lines, "revision = " .. toml_quote(origin.revision)) end
+	if origin.hash then table.insert(lines, "hash = " .. toml_quote(origin.hash)) end
 end
 
 local function is_array(value)
@@ -355,6 +404,7 @@ registry.package = function(ctx, inputs, opts)
 	local bin_name = meta.bin_name or meta.name or "app"
 	local libexec_root = meta.libexec_root or ""
 	local readme_content = resolve_readme_content(inputs, opts)
+	local origin = resolve_origin(inputs, opts)
 	local entry_prefix = libexec_root ~= "" and libexec_root .. "/" or ""
 	local provides_list = {}
 	if target == "any" then
@@ -438,6 +488,7 @@ registry.package = function(ctx, inputs, opts)
 	if readme_content then
 		table.insert(package_lines, "readme = " .. toml_quote(README_SIDECAR))
 	end
+	append_origin(package_lines, origin)
 	table.insert(package_lines, "")
 	if dependency_section ~= "" then
 		table.insert(package_lines, dependency_section)
@@ -605,6 +656,7 @@ registry.source_package = function(ctx, inputs, opts)
 	local url = string.format("blobs/b3/%s/%s/%s.tar.zst", digest:sub(1, 2), digest:sub(3, 4), digest)
 
 	local readme_content = resolve_readme_content(inputs, opts)
+	local origin = resolve_origin(inputs, opts)
 	local package_lines = {
 		"[package]",
 		"name = " .. toml_quote(package_name),
@@ -615,6 +667,7 @@ registry.source_package = function(ctx, inputs, opts)
 	if readme_content then
 		table.insert(package_lines, "readme = " .. toml_quote(README_SIDECAR))
 	end
+	append_origin(package_lines, origin)
 	for _, line in ipairs({
 		"",
 		"[[artifacts]]",

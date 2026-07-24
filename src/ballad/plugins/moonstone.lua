@@ -335,6 +335,7 @@ return {
     end
     local name = pkg.name or "app"
     local description = pkg.description or ""
+    local origin = loaded.manifest and loaded.manifest.origin or nil
     local runtime_name = rt.name or env_rt.name or "lua"
     local runtime_version = rt.version or env_rt.version or "5.1"
     local runtime = runtime_name .. "@" .. runtime_version
@@ -375,6 +376,7 @@ return {
       runtime_spec = runtime,
       lua_abi = lua_abi,
       registry_name = pkg.registry_name or nil,
+      origin = origin,
       readme = readme_path,
       readme_content = readme_content,
       packages = packages,
@@ -456,6 +458,7 @@ return {
         env = loaded.env,
         abi = loaded.env and loaded.env.runtime and loaded.env.runtime.abi or "5.1",
         dependencies = dep_roles,
+        origin = loaded.manifest and loaded.manifest.origin or nil,
         readme = (pkg.readme and pkg.readme ~= "") and pkg.readme
           or (fs.read_file(path.join(loaded.root, "REGISTRY_README.md")) and "REGISTRY_README.md")
           or (fs.read_file(path.join(loaded.root, "README.md")) and "README.md" or nil),

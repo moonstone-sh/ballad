@@ -11,6 +11,10 @@ cat > "$WORK_DIR/moonstone.toml" <<'TOML'
 name = "user/readme-demo"
 version = "0.4.2"
 kind = "lib"
+
+[origin]
+kind = "git"
+url = "https://github.com/example/readme-demo"
 TOML
 cat > "$WORK_DIR/README.md" <<'MD'
 # Repository README
@@ -59,6 +63,8 @@ test -f "$OUT/package.toml" || { echo "FAIL: package.toml missing"; exit 1; }
 test -f "$OUT/README.md" || { echo "FAIL: README.md not emitted"; exit 1; }
 grep -q '^readme = ' "$OUT/package.toml" || { echo "FAIL: package.toml has no readme field"; exit 1; }
 grep -q '^readme = "README.md"$' "$OUT/package.toml" || { echo "FAIL: package.toml does not point to README.md"; exit 1; }
+grep -q '^\[origin\]$' "$OUT/package.toml" || { echo "FAIL: package.toml has no origin table"; exit 1; }
+grep -q '^url = "https://github.com/example/readme-demo"$' "$OUT/package.toml" || { echo "FAIL: package.toml origin URL missing"; exit 1; }
 ! grep -q 'hands-on package guide' "$OUT/package.toml" || { echo "FAIL: package.toml embeds README markdown"; exit 1; }
 grep -q 'hands-on package guide' "$OUT/README.md" || { echo "FAIL: dedicated registry README was not selected"; exit 1; }
 ! grep -q 'Contributor-facing repository documentation' "$OUT/README.md" || { echo "FAIL: repository README was selected instead"; exit 1; }

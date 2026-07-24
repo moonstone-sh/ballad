@@ -4,6 +4,10 @@ version = "0.2.32"
 kind = "script"
 description = "Deterministic Lua project exporter and bundler for Moonstone"
 
+[origin]
+kind = "git"
+url = "https://github.com/moonstone-sh/ballad"
+
 [runtime]
 name = "moonstone/luajit"
 version = "2.1.0"

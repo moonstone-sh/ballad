@@ -28,9 +28,7 @@ return ballad.partiture(function(p)
 		description = project.description,
 		-- Package the project README (declared via `readme = "./README.md"` in
 		-- moonstone.toml [package], or auto-detected as ./REGISTRY_README.md,
-		-- then ./README.md) into the
-		-- release artifact: inlined into package.toml AND emitted as README.md,
-		-- then uploaded by publish.sh as the `readme` form field.
+		-- then ./README.md) as the README.md sidecar uploaded by publish.sh.
 		readme = project.readme,
 		readme_content = project.readme_content,
 	})
