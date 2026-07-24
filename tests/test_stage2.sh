@@ -18,6 +18,7 @@ luajit src/main.lua play partiture.lua
 PKG_VERSION=$(grep '^version' dist/ballad/registry-artifact/package.toml | head -1)
 echo "package.toml version line: $PKG_VERSION"
 echo "$PKG_VERSION" | grep -q '0.2.' || { echo "FAIL: version mismatch"; exit 1; }
+grep -A4 '^\[\[dependencies\]\]$' dist/ballad/registry-artifact/package.toml | grep -q 'name = "dkjson"' || { echo "FAIL: registry descriptor omitted dkjson runtime dependency"; exit 1; }
 PACKAGE_ARCHIVE=$(find dist/ballad/registry-artifact -maxdepth 1 -type f -name 'ballad-*-any.tar.gz' -print -quit)
 if tar -tzf "$PACKAGE_ARCHIVE" | grep -Eq '^\./libexec/ballad/(\.ci|docs|fixtures|synthetic-playground|tests)/'; then
   echo "FAIL: registry artifact contains non-runtime project files"

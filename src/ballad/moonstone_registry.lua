@@ -451,32 +451,42 @@ registry.package = function(ctx, inputs, opts)
 	end
 
 	-- Build dependency metadata from layout
-	local dependency_sections = {}
+	local dependency_entries = {}
 	if meta.dependencies then
 		for role, dep_list in pairs(meta.dependencies) do
 			for dep_name, spec in pairs(dep_list) do
-				if role == "peer" or role == "optional" then
-					local lines = {
-						"",
-						"[[dependencies]]",
-						'name = "' .. dep_name .. '"',
-						'role = "' .. role .. '"',
-					}
-					if spec.package then
-						table.insert(lines, 'package = "' .. spec.package .. '"')
-					end
-					if spec.constraint then
-						table.insert(lines, 'constraint = "' .. spec.constraint .. '"')
-					end
-					if spec.optional or role == "optional" then
-						table.insert(lines, "optional = true")
-					end
-					table.insert(dependency_sections, table.concat(lines, "\n"))
+				local constraint = spec.constraint or "*"
+				local resolver = spec.resolver
+				local prefix, remainder = constraint:match("^([^:]+):(.+)$")
+				if prefix then
+					resolver = resolver or prefix
+					constraint = remainder:match("@(.+)$") or "*"
 				end
+				resolver = resolver or "moonstone"
+				dependency_entries[#dependency_entries + 1] = {
+					role = role,
+					resolver = resolver,
+					name = dep_name,
+					constraint = constraint,
+				}
 			end
 		end
 	end
-	local dependency_section = table.concat(dependency_sections, "\n")
+	table.sort(dependency_entries, function(left, right)
+		return table.concat({ left.role, left.resolver, left.name, left.constraint }, "\0")
+			< table.concat({ right.role, right.resolver, right.name, right.constraint }, "\0")
+	end)
+	local dependency_sections = {}
+	for _, dependency in ipairs(dependency_entries) do
+		dependency_sections[#dependency_sections + 1] = table.concat({
+			"[[dependencies]]",
+			"name = " .. toml_quote(dependency.name),
+			"constraint = " .. toml_quote(dependency.constraint),
+			"resolver = " .. toml_quote(dependency.resolver),
+			"role = " .. toml_quote(dependency.role),
+		}, "\n")
+	end
+	local dependency_section = table.concat(dependency_sections, "\n\n")
 
 	local package_lines = {
 		"[package]",
