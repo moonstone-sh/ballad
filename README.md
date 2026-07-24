@@ -262,8 +262,9 @@ For every registry package shape, Ballad resolves README content in this order:
 4. `REGISTRY_README.md` at the project root.
 5. `README.md` at the project root.
 
-The generated package still writes the selected content as `README.md` and
-uploads it through the registry protocol. The split changes authoring intent,
-not the registry format.
+The generated descriptor records `readme = "README.md"` as a compact sidecar
+pointer. Ballad writes the selected Markdown into that sidecar and uploads it
+separately through the registry protocol, so a package descriptor never embeds
+a large user-facing document.
 
 The source archive is emitted as `name-version-source.tar.zst`; `zstd` must be available in `PATH`.

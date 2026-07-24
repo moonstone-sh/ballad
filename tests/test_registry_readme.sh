@@ -58,6 +58,8 @@ OUT="$WORK_DIR/dist/registry/readme-demo"
 test -f "$OUT/package.toml" || { echo "FAIL: package.toml missing"; exit 1; }
 test -f "$OUT/README.md" || { echo "FAIL: README.md not emitted"; exit 1; }
 grep -q '^readme = ' "$OUT/package.toml" || { echo "FAIL: package.toml has no readme field"; exit 1; }
+grep -q '^readme = "README.md"$' "$OUT/package.toml" || { echo "FAIL: package.toml does not point to README.md"; exit 1; }
+! grep -q 'hands-on package guide' "$OUT/package.toml" || { echo "FAIL: package.toml embeds README markdown"; exit 1; }
 grep -q 'hands-on package guide' "$OUT/README.md" || { echo "FAIL: dedicated registry README was not selected"; exit 1; }
 ! grep -q 'Contributor-facing repository documentation' "$OUT/README.md" || { echo "FAIL: repository README was selected instead"; exit 1; }
 grep -q -- '-F readme=@' "$OUT/publish.sh" || { echo "FAIL: publish.sh missing readme upload"; exit 1; }

@@ -42,6 +42,8 @@ local process = require("ballad.process")
 registry.name = "ballad.moonstone_registry"
 registry.version = "0.1.0"
 
+local README_SIDECAR = "README.md"
+
 registry.methods = {
 	package = {
 		inputs = { "asset_set" },
@@ -434,7 +436,7 @@ registry.package = function(ctx, inputs, opts)
 		'description = "Exported ' .. pkg_name .. ' package"',
 	}
 	if readme_content then
-		table.insert(package_lines, "readme = " .. toml_quote(readme_content))
+		table.insert(package_lines, "readme = " .. toml_quote(README_SIDECAR))
 	end
 	table.insert(package_lines, "")
 	if dependency_section ~= "" then
@@ -473,8 +475,8 @@ registry.package = function(ctx, inputs, opts)
 	fs.write_file(path.join(artifact_dir, "package.toml"), package_toml)
 	local readme_field = ""
 	if readme_content then
-		fs.write_file(path.join(artifact_dir, "README.md"), readme_content)
-		readme_field = ' -F readme=@"$(dirname "$0")/README.md"'
+		fs.write_file(path.join(artifact_dir, README_SIDECAR), readme_content)
+		readme_field = ' -F readme=@"$(dirname "$0")/' .. README_SIDECAR .. '"'
 	end
 	local publish_lines = {
 		"#!/usr/bin/env sh",
@@ -511,7 +513,7 @@ registry.package = function(ctx, inputs, opts)
 			tarball = tarball_path,
 			package_toml = path.join(artifact_dir, "package.toml"),
 			publish_sh = publish_path,
-			readme = readme_content and path.join(artifact_dir, "README.md") or nil,
+			readme = readme_content and path.join(artifact_dir, README_SIDECAR) or nil,
 		},
 	}))
 	return assets
@@ -611,7 +613,7 @@ registry.source_package = function(ctx, inputs, opts)
 		"description = " .. toml_quote(opts.description or ("Source package for " .. package_name)),
 	}
 	if readme_content then
-		table.insert(package_lines, "readme = " .. toml_quote(readme_content))
+		table.insert(package_lines, "readme = " .. toml_quote(README_SIDECAR))
 	end
 	for _, line in ipairs({
 		"",
@@ -637,8 +639,8 @@ registry.source_package = function(ctx, inputs, opts)
 	fs.write_file(path.join(out_dir, "package.toml"), table.concat(package_lines, "\n") .. "\n")
 	local readme_field = ""
 	if readme_content then
-		fs.write_file(path.join(out_dir, "README.md"), readme_content)
-		readme_field = ' -F readme=@"$(dirname "$0")/README.md"'
+		fs.write_file(path.join(out_dir, README_SIDECAR), readme_content)
+		readme_field = ' -F readme=@"$(dirname "$0")/' .. README_SIDECAR .. '"'
 	end
 
 	local publish_lines = {
@@ -765,7 +767,7 @@ registry.runtime = function(ctx, inputs, opts)
 		'description = "' .. (opts.description or (name .. " runtime packaged for Moonstone")) .. '"',
 	}
 	if readme_content then
-		table.insert(package_lines, "readme = " .. toml_quote(readme_content))
+		table.insert(package_lines, "readme = " .. toml_quote(README_SIDECAR))
 	end
 	table.insert(package_lines, "")
 
@@ -824,8 +826,8 @@ registry.runtime = function(ctx, inputs, opts)
 	fs.write_file(descriptor_path, table.concat(package_lines, "\n") .. "\n")
 	local readme_field = ""
 	if readme_content then
-		fs.write_file(path.join(out_dir, "README.md"), readme_content)
-		readme_field = ' -F readme=@"' .. path.join(out_dir, "README.md") .. '"'
+		fs.write_file(path.join(out_dir, README_SIDECAR), readme_content)
+		readme_field = ' -F readme=@"' .. path.join(out_dir, README_SIDECAR) .. '"'
 	end
 	local publish_lines = {
 		"#!/usr/bin/env sh",
@@ -876,7 +878,7 @@ registry.runtime = function(ctx, inputs, opts)
 			artifacts = artifact_paths,
 			package_toml = descriptor_path,
 			publish_sh = publish_path,
-			readme = readme_content and path.join(out_dir, "README.md") or nil,
+			readme = readme_content and path.join(out_dir, README_SIDECAR) or nil,
 		},
 	}))
 	return assets
