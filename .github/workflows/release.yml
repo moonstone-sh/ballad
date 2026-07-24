@@ -58,6 +58,7 @@ jobs:
               ./tests/test_stage2.sh
             fi
             ./tests/test_watcher.sh
+            ./tests/test_native_action.sh
             ./tests/test_publish_verification.sh
           '
           moon run play

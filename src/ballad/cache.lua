@@ -191,6 +191,8 @@ function cache.compute_native_key(opts, plugin_name, method_name)
     args = opts.args,
     cwd = opts.cwd,
     env = opts.env,
+    action_id = opts.id,
+    toolchain_fingerprint = opts.toolchain_fingerprint,
     input_hashes = input_hashes,
     outputs = opts.outputs,
   }

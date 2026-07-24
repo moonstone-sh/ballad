@@ -5,6 +5,7 @@ require("ballad.types")
 ---@type Ballad
 return {
   partiture = partiture.partiture,
+  action = require("ballad.native_action"),
   plugins = {
     layout = require("ballad.plugins.layout"),
     love = require("ballad.plugins.love"),

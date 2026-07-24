@@ -231,6 +231,7 @@ function PipelineContext.new(graph, host, jobs)
   }, PipelineContext)
   self.source = {}
   self.sink = {}
+  self.task = {}
   self.source.directory = function(dir_path, opts)
     return self:_core_node("ballad.core.source", "directory", {}, opts or { path = dir_path }, function(o) o.path = o.path or dir_path end)
   end
@@ -267,6 +268,32 @@ function PipelineContext.new(graph, host, jobs)
     local inputs = input and { input } or {}
     return self:_core_node("ballad.core.sink", "none", inputs, opts or {})
   end
+  ---Declare reusable native work. Call p.task.run(action) in a finite pipeline,
+  ---or pass it to watcher.watch({ reactions = { { run = action } } }).
+  self.task.native = function(opts)
+    return require("ballad.native_action").new(opts)
+  end
+  self.task.run = function(action, opts)
+    local native_action = require("ballad.native_action")
+    if not native_action.is_action(action) then error("task.run expects a task.native action") end
+    opts = opts or {}
+    local handle = self:_core_node("ballad.core.action", "native", {}, {
+      action = action:to_table(),
+      label = opts.label or action.opts.description or action.opts.id,
+    })
+    if opts.depends_on then
+      local dependencies = getmetatable(opts.depends_on) == NodeHandle and { opts.depends_on } or opts.depends_on
+      if type(dependencies) ~= "table" then error("task.run depends_on must be a node handle or array") end
+      local node = self._graph.nodes[handle._id]
+      for _, dependency in ipairs(dependencies) do
+        if getmetatable(dependency) ~= NodeHandle then error("task.run depends_on entries must be node handles") end
+        table.insert(node.inputs, dependency._id)
+        self._graph.edges[dependency._id] = self._graph.edges[dependency._id] or {}
+        table.insert(self._graph.edges[dependency._id], node.id)
+      end
+    end
+    return handle
+  end
   return self
 end
 
@@ -281,7 +308,7 @@ function PipelineContext:_core_node(plugin, method, inputs, opts, mutate_opts)
       error(method .. " expects pipeline node handles as inputs")
     end
   end
-  local role = plugin == "ballad.core.source" and "source" or "sink"
+  local role = plugin == "ballad.core.source" and "source" or (plugin == "ballad.core.action" and "transform" or "sink")
   local node = self._graph:add_node({
     plugin = plugin,
     method = method,
@@ -289,7 +316,7 @@ function PipelineContext:_core_node(plugin, method, inputs, opts, mutate_opts)
     label = opts.label or method,
     inputs = input_ids,
     options = opts,
-    effects = role == "sink" and { "write" } or { "read" },
+    effects = (role == "sink" or plugin == "ballad.core.action") and { "write" } or { "read" },
     progress_weight = opts.progress_weight or 1,
     cacheable = false,
     parallel_safe = method ~= "stdout",
@@ -1028,7 +1055,40 @@ local function core_handler(plugin, method)
   local process = require("ballad.process")
   local dkjson = require("dkjson")
 
-  if plugin == "ballad.core.source" then
+  if plugin == "ballad.core.action" and method == "native" then
+    return function(ctx, _, opts)
+      local native_action = require("ballad.native_action")
+      local action = native_action.new(opts.action)
+      local result = native_action.run(action)
+      local task_id = ctx.graph:add_native_task({
+        kind = "native_action",
+        plugin = "ballad.core.action",
+        method = "native",
+        action_id = action.opts.id,
+        tool = action.opts.tool or (action.opts.cmd and action.opts.cmd:match("^%S+")),
+        inputs = action.opts.inputs or {},
+        outputs = action.opts.outputs or {},
+        cacheable = action.opts.cacheable ~= false,
+        status = result.cache_hit and "cached" or "success",
+      })
+      local assets = graph_mod.AssetSet.new()
+      for _, output in ipairs(action.opts.outputs or {}) do
+        assets:add(ctx.graph:add_asset({
+          kind = "generated",
+          virtual_path = output,
+          output_path = output,
+          generated = true,
+          metadata = {
+            action_id = action.opts.id,
+            native_task_id = task_id,
+            cache_hit = result.cache_hit,
+            native_action = true,
+          },
+        }))
+      end
+      return assets
+    end
+  elseif plugin == "ballad.core.source" then
     if method == "directory" then
       return function(ctx, _, opts)
         local root = opts.path or opts.root or "."

@@ -2,6 +2,7 @@ local graph = require("ballad.graph")
 local fs = require("ballad.fs")
 local path = require("ballad.path")
 local process = require("ballad.process")
+local native_action = require("ballad.native_action")
 
 ---@class WatcherPluginContract
 local watcher = {
@@ -84,6 +85,25 @@ local function watch_inputs(ctx, watch, subject)
   return inputs
 end
 
+local function normalize_action(spec, subject)
+  local before = spec.before
+  local effect = spec.effect or spec.command
+  local action = spec.run
+  if before ~= nil and (type(before) ~= "string" or before == "") then
+    error(subject .. " before must be a non-empty command string")
+  end
+  if effect ~= nil and (type(effect) ~= "string" or effect == "") then
+    error(subject .. " effect must be a non-empty command string")
+  end
+  if action ~= nil and not native_action.is_action(action) then
+    error(subject .. " run must be a task.native action")
+  end
+  if effect == nil and action == nil then
+    error(subject .. " requires effect/command or run")
+  end
+  return before, effect, action
+end
+
 local function normalize_reaction(ctx, reaction, index, subject)
   if type(reaction) ~= "table" then error(subject .. " " .. index .. " must be a table") end
   if type(reaction.watch) ~= "table" or #reaction.watch == 0 then
@@ -94,16 +114,15 @@ local function normalize_reaction(ctx, reaction, index, subject)
       error(subject .. " " .. index .. " watch entries must be source node ids")
     end
   end
-  local effect = reaction.effect or reaction.command
-  if type(effect) ~= "string" or effect == "" then
-    error(subject .. " " .. index .. " requires an effect command string")
-  end
+  local before, effect, action = normalize_action(reaction, subject .. " " .. index)
   local inputs = watch_inputs(ctx, reaction.watch, subject .. " " .. index)
   for _, input in ipairs(inputs) do assert_glob(input, subject .. " input") end
   return {
       label = reaction.label or (subject .. "-" .. index),
       inputs = inputs,
+      before = before,
       effect = effect,
+      action = action,
       watch = reaction.watch,
       outputs = reaction.outputs or {},
   }
@@ -141,6 +160,53 @@ local function reaction_snapshot(reaction)
   }, " ")
 end
 
+local function reason_assignment(reason)
+  if reason == "$reason" then return '"$reason"' end
+  return shell_quote(reason)
+end
+
+local function action_command(action, reason)
+  if not action then return nil end
+  local runner = os.getenv("BALLAD_ACTION_RUNNER")
+  if runner then
+    return "BALLAD_WATCH_REASON=" .. reason_assignment(reason) .. " " .. runner .. " " .. shell_quote(action.spec_path)
+  end
+  return "BALLAD_WATCH_REASON=" .. reason_assignment(reason)
+    .. " lua -e " .. shell_quote("require('ballad.native_action').run_file(arg[1])")
+    .. " " .. shell_quote(action.spec_path)
+end
+
+local function run_command(step, reason, cwd_prefix)
+  local commands = {}
+  if step.before then
+    commands[#commands + 1] = "BALLAD_WATCH_REASON=" .. reason_assignment(reason) .. " sh -c " .. shell_quote(step.before)
+  end
+  local action = action_command(step.action, reason)
+  if action then commands[#commands + 1] = action end
+  if step.effect then
+    commands[#commands + 1] = "BALLAD_WATCH_REASON=" .. reason_assignment(reason) .. " sh -c " .. shell_quote(step.effect)
+  end
+  return cwd_prefix .. table.concat(commands, " && ")
+end
+
+local function write_action_specs(node_id, initial, reactions, options)
+  local state_dir = options.state_dir or ".ballad/watchers"
+  local actions_dir = path.join(state_dir, node_id .. "-actions")
+  local written = {}
+  local function prepare(step)
+    if not step or not step.action then return end
+    local id = step.action.opts.id
+    local spec_path = path.join(actions_dir, id .. ".json")
+    if not written[spec_path] then
+      native_action.write_file(step.action, spec_path)
+      written[spec_path] = true
+    end
+    step.action = { spec_path = spec_path }
+  end
+  prepare(initial)
+  for _, reaction in ipairs(reactions) do prepare(reaction) end
+end
+
 local function write_script(node_id, initial, reactions, options)
   local interval = tonumber(options.interval) or 0.5
   local debounce = tonumber(options.debounce) or 0.1
@@ -152,6 +218,7 @@ local function write_script(node_id, initial, reactions, options)
   local script_path = path.join(state_dir, node_id .. ".sh")
   local cwd_prefix = options.cwd and ("cd " .. shell_quote(options.cwd) .. " && ") or ""
   local cleanup = options.cleanup or ""
+  write_action_specs(node_id, initial, reactions, options)
   local body = {
     "#!/bin/sh",
     "set -eu",
@@ -168,7 +235,7 @@ local function write_script(node_id, initial, reactions, options)
   if initial then
     body[#body + 1] = "run_initial() {"
     body[#body + 1] = "  printf '%s\\n' \"ballad watcher: " .. initial.label .. " (initial)\" >&2"
-    body[#body + 1] = "  " .. cwd_prefix .. "BALLAD_WATCH_REASON=initial sh -c " .. shell_quote(initial.effect)
+    body[#body + 1] = "  " .. run_command(initial, "initial", cwd_prefix)
     body[#body + 1] = "}"
     body[#body + 1] = "run_initial"
   end
@@ -178,7 +245,7 @@ local function write_script(node_id, initial, reactions, options)
     body[#body + 1] = "run_" .. index .. "() {"
     body[#body + 1] = "  reason=$1"
     body[#body + 1] = "  printf '%s\\n' \"ballad watcher: " .. reaction.label .. " ($reason)\" >&2"
-    body[#body + 1] = "  " .. cwd_prefix .. "BALLAD_WATCH_REASON=\"$reason\" sh -c " .. shell_quote(reaction.effect)
+    body[#body + 1] = "  " .. run_command(reaction, "$reason", cwd_prefix)
     body[#body + 1] = "}"
     body[#body + 1] = "last_" .. index .. "=$(snapshot_" .. index .. ")"
   end
@@ -213,13 +280,12 @@ function watcher.watch(ctx, _, spec)
   local options = spec.options or {}
   local initial = nil
   if spec.initial then
-    local effect = spec.initial.effect or spec.initial.command
-    if type(effect) ~= "string" or effect == "" then
-      ctx.fail("watcher initial requires an effect command string")
-    end
+    local before, effect, action = normalize_action(spec.initial, "watcher initial")
     initial = {
       label = spec.initial.label or "watcher initial",
+      before = before,
       effect = effect,
+      action = action,
       outputs = spec.initial.outputs or {},
     }
   end
@@ -227,7 +293,11 @@ function watcher.watch(ctx, _, spec)
   if options.once then
     if initial then
       local cwd_prefix = options.cwd and ("cd " .. shell_quote(options.cwd) .. " && ") or ""
-      if not command_ok(cwd_prefix .. "BALLAD_WATCH_REASON=initial sh -c " .. shell_quote(initial.effect)) then
+      if initial.before and not command_ok(cwd_prefix .. "BALLAD_WATCH_REASON=initial sh -c " .. shell_quote(initial.before)) then
+        ctx.fail("watcher initial pre-build action failed: " .. initial.label)
+      end
+      if initial.action then native_action.run(initial.action) end
+      if initial.effect and not command_ok(cwd_prefix .. "BALLAD_WATCH_REASON=initial sh -c " .. shell_quote(initial.effect)) then
         ctx.fail("watcher initial action failed: " .. initial.label)
       end
     end

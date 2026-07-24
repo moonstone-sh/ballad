@@ -4,6 +4,7 @@
 ---plugin transforms, and explicit `p.sink.*` outputs.
 ---@class Ballad
 ---@field partiture fun(fn: fun(p: PipelineContext)): fun(p: PipelineContext) Define a partiture callback.
+---@field action table Native action serialization and execution helpers.
 ---@field plugins BalladBuiltinPlugins Built-in plugin contracts for typed `p:use(ballad.plugins.*)` calls.
 
 ---@class BalladBuiltinPlugins
@@ -154,6 +155,7 @@
 ---@class PipelineContext
 ---@field source PipelineSourceNamespace Core source nodes.
 ---@field sink PipelineSinkNamespace Core sink nodes; every partiture must declare at least one.
+---@field task PipelineTaskApi Reusable native actions for finite pipelines and watcher reactions.
 ---@field files fun(self: PipelineContext, pattern_or_patterns: string|string[]): AssetSet Legacy direct file collection using Lua patterns.
 ---@field asset fun(self: PipelineContext, path: string, opts: AssetOptions|nil): Asset Create an asset for an existing file.
 ---@field generated fun(self: PipelineContext, path: string, content: string, opts: GeneratedAssetOptions|nil): Asset Create an in-memory generated asset.
@@ -434,11 +436,15 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field label string|nil Human-readable reaction label used in logs.
 ---@field watch NodeHandle[] Non-empty source node handles that determine when this reaction fires.
 ---@field outputs string[]|nil Paths refreshed by the effect; retained in session metadata and graph debug output.
----@field effect string Shell command run with `BALLAD_WATCH_REASON=change` after a matching debounced change.
+---@field before string|nil Shell command run before the declared action, for supervision handoff or validation.
+---@field effect string|nil Shell command run with `BALLAD_WATCH_REASON=change` after a matching debounced change.
+---@field run NativeAction|nil Declared action replayed through Ballad's action cache after a matching debounced change.
 
 ---@class WatcherInitialAction
 ---@field label string|nil Human-readable bootstrap label used in logs.
----@field effect string Shell command run once with `BALLAD_WATCH_REASON=initial` before snapshots begin.
+---@field before string|nil Shell command run before the declared action, for supervision handoff or validation.
+---@field effect string|nil Shell command run once with `BALLAD_WATCH_REASON=initial` before snapshots begin.
+---@field run NativeAction|nil Declared action replayed through Ballad's action cache during bootstrap.
 ---@field outputs string[]|nil Paths refreshed by the bootstrap; retained in session metadata and graph debug output.
 
 ---@class WatcherOptions
@@ -448,6 +454,21 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field debounce number|nil Quiet period before a changed reaction runs; defaults to `0.1`.
 ---@field state_dir string|nil Directory for the generated supervised shell script; defaults to `.ballad/watchers`.
 ---@field once boolean|nil Run only `initial` and return without starting a daemon; useful for CI and smoke tests.
+
+---@class NativeAction
+---@field opts NativeTaskOpts
+
+---@class NativeActionToolchain
+---@field command string Command whose normalized stdout is included in the action cache identity, e.g. `zig version`.
+
+---@class NativeActionOpts: NativeTaskOpts
+---@field id string Stable semantic identity shared by compatible partitures.
+---@field toolchain NativeActionToolchain|nil Optional version probe included in the cache key.
+---@field toolchain_fingerprint string|nil Explicit toolchain identity when probing is unsuitable.
+
+---@class PipelineTaskApi
+---@field native fun(opts: NativeActionOpts): NativeAction Declare reusable cacheable native work.
+---@field run fun(action: NativeAction, opts: table|nil): NodeHandle Add an action to the finite pipeline graph.
 
 ---@class WatcherSpec
 ---@field initial WatcherInitialAction|nil Optional bootstrap action that runs exactly once before change detection.

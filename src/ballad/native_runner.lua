@@ -74,18 +74,33 @@ function native_runner.run(opts)
   end
 
   if not fs.is_dir(cwd) then
-    fs.mkdir(cwd)
+    return {
+      ok = false,
+      missing_tool = false,
+      tool = tool,
+      description = opts.description or cmd_opt or "native task",
+      exit_code = -1,
+      stdout = "",
+      stderr = "cwd does not exist: " .. cwd,
+      missing_outputs = outputs,
+    }
   end
 
   local stdout_text = ""
   local stderr_text = ""
   local exit_code = 0
 
+  local env_prefix = ""
+  for key, value in pairs(opts.env or {}) do
+    env_prefix = env_prefix .. key .. "=" .. process.quote(value) .. " "
+  end
+  cmd = env_prefix .. cmd
+
   local stdout_file = os.tmpname()
   local stderr_file = os.tmpname()
   local exit_file = os.tmpname()
 
-  os.execute("(" .. cmd .. " > " .. process.quote(stdout_file) .. " 2> " .. process.quote(stderr_file) .. "; echo $? > " .. process.quote(exit_file) .. ")")
+  os.execute("(cd " .. process.quote(cwd) .. " && " .. cmd .. " > " .. process.quote(stdout_file) .. " 2> " .. process.quote(stderr_file) .. "; echo $? > " .. process.quote(exit_file) .. ")")
 
   local f = io.open(exit_file, "r")
   if f then

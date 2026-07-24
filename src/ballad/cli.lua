@@ -7,6 +7,7 @@ local KNOWN_COMMANDS = {
   play = true,
   help = true,
   init = true,
+  ["action-run"] = true,
 }
 
 local function print_help()
@@ -15,6 +16,7 @@ local function print_help()
   print("Commands:")
   print("  play <file>       Execute a partiture.lua pipeline script (default)")
   print("  init <template>   Scaffold a partiture.lua from a template")
+  print("  action-run <file> Execute a serialized native action (watcher internal)")
   print("  help              Show this help message")
   print("")
   print("Templates for init:")
@@ -59,6 +61,8 @@ function cli.parse_args(args)
     options.command = positionals[1]
     if options.command == "init" then
       options.template = positionals[2]
+    elseif options.command == "action-run" then
+      options.action_file = positionals[2]
     else
       options.partiture_file = positionals[2]
     end
@@ -128,6 +132,10 @@ function cli.main(args)
     fout:write(content)
     fout:close()
     print("Successfully initialized partiture.lua from template: " .. options.template)
+  elseif options.command == "action-run" then
+    if not options.action_file then process.fail("Usage: ballad action-run <action.json>") end
+    local ok, err = pcall(require("ballad.native_action").run_file, options.action_file)
+    if not ok then process.fail(tostring(err)) end
   elseif options.command == "help" then
     print_help()
   else
