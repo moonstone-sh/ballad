@@ -156,6 +156,7 @@
 ---@field source PipelineSourceNamespace Core source nodes.
 ---@field sink PipelineSinkNamespace Core sink nodes; every partiture must declare at least one.
 ---@field task PipelineTaskApi Reusable native actions for finite pipelines and watcher reactions.
+---@field invocation BalladInvocation Opaque arguments supplied after `ballad play <partiture> --`.
 ---@field files fun(self: PipelineContext, pattern_or_patterns: string|string[]): AssetSet Legacy direct file collection using Lua patterns.
 ---@field asset fun(self: PipelineContext, path: string, opts: AssetOptions|nil): Asset Create an asset for an existing file.
 ---@field generated fun(self: PipelineContext, path: string, content: string, opts: GeneratedAssetOptions|nil): Asset Create an in-memory generated asset.
@@ -469,6 +470,9 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@class PipelineTaskApi
 ---@field native fun(opts: NativeActionOpts): NativeAction Declare reusable cacheable native work.
 ---@field run fun(action: NativeAction, opts: table|nil): NodeHandle Add an action to the finite pipeline graph.
+
+---@class BalladInvocation
+---@field args string[] Invocation-local copy of opaque caller arguments.
 
 ---@class WatcherSpec
 ---@field initial WatcherInitialAction|nil Optional bootstrap action that runs exactly once before change detection.

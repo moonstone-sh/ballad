@@ -14,7 +14,7 @@ local function print_help()
   print("Usage: ballad <command> [args]")
   print("")
   print("Commands:")
-  print("  play <file>       Execute a partiture.lua pipeline script (default)")
+  print("  play <file> [-- args…]  Execute a partiture.lua pipeline script (default)")
   print("  init <template>   Scaffold a partiture.lua from a template")
   print("  action-run <file> Execute a serialized native action (watcher internal)")
   print("  help              Show this help message")
@@ -34,6 +34,7 @@ function cli.parse_args(args)
     partiture_file = nil,
     template = nil,
     jobs = 1,
+    invocation_args = {},
   }
 
   local positionals = {}
@@ -42,7 +43,14 @@ function cli.parse_args(args)
   while index <= #args do
     local arg_value = args[index]
 
-    if arg_value == "--jobs" or arg_value == "-j" then
+    if arg_value == "--" then
+      index = index + 1
+      while index <= #args do
+        options.invocation_args[#options.invocation_args + 1] = args[index]
+        index = index + 1
+      end
+      break
+    elseif arg_value == "--jobs" or arg_value == "-j" then
       index = index + 1
       options.jobs = tonumber(args[index]) or 1
     elseif arg_value == "--help" or arg_value == "help" then
@@ -95,7 +103,7 @@ function cli.main(args)
     if not options.partiture_file then
       process.fail("Usage: ballad play <partiture.lua>")
     end
-    local p = partiture.load(options.partiture_file, options.jobs)
+    local p = partiture.load(options.partiture_file, options.jobs, options.invocation_args)
     print("Partiture loaded: " .. options.partiture_file)
     print("Executing pipeline graph...")
     local results = p:execute()

@@ -217,7 +217,9 @@ local function path_lists_overlap(left, right)
   return false
 end
 
-function PipelineContext.new(graph, host, jobs)
+function PipelineContext.new(graph, host, jobs, invocation_args)
+  local args = {}
+  for index, value in ipairs(invocation_args or {}) do args[index] = value end
   local self = setmetatable({
     _graph = graph,
     _host = host,
@@ -229,6 +231,8 @@ function PipelineContext.new(graph, host, jobs)
     _jobs = jobs or 1,
     _pending_tasks = {},
   }, PipelineContext)
+  self.invocation = { args = args }
+  graph.metadata.invocation = { args = args }
   self.source = {}
   self.sink = {}
   self.task = {}
@@ -1204,9 +1208,9 @@ end
 local Pipeline = {}
 Pipeline.__index = Pipeline
 
-function Pipeline.new(host, jobs)
+function Pipeline.new(host, jobs, invocation_args)
   local g = graph_mod.Graph.new()
-  local ctx = PipelineContext.new(g, host, jobs)
+  local ctx = PipelineContext.new(g, host, jobs, invocation_args)
   return setmetatable({
     _graph = g,
     _host = host,
@@ -1464,8 +1468,8 @@ function Pipeline:execute()
   return sink_results
 end
 
-function pipeline.new(host, jobs)
-  return Pipeline.new(host, jobs)
+function pipeline.new(host, jobs, invocation_args)
+  return Pipeline.new(host, jobs, invocation_args)
 end
 
 return pipeline

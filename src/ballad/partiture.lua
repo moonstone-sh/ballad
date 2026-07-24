@@ -7,10 +7,11 @@ local partiture = {}
 
 ---@param fn PartitureFn
 ---@param jobs? integer
+---@param invocation_args? string[] opaque arguments supplied after `ballad play <file> --`
 ---@return Pipeline
-function partiture.build(fn, jobs)
+function partiture.build(fn, jobs, invocation_args)
   local host = plugin_host.new()
-  local p = pipeline.new(host, jobs)
+  local p = pipeline.new(host, jobs, invocation_args)
   local ok, err = pcall(fn, p:context())
   if not ok then
     error("partiture construction failed: " .. tostring(err))
@@ -20,8 +21,9 @@ end
 
 ---@param filepath string
 ---@param jobs? integer
+---@param invocation_args? string[] opaque arguments supplied after `ballad play <file> --`
 ---@return Pipeline
-function partiture.load(filepath, jobs)
+function partiture.load(filepath, jobs, invocation_args)
   local chunk, err = loadfile(filepath)
   if not chunk then
     error("Failed to load partiture file '" .. filepath .. "': " .. tostring(err))
@@ -33,7 +35,7 @@ function partiture.load(filepath, jobs)
   if type(result) ~= "function" then
     error("Partiture file '" .. filepath .. "' must return a function (ballad.partiture(...))")
   end
-  return partiture.build(result, jobs)
+  return partiture.build(result, jobs, invocation_args)
 end
 
 ---@param fn PartitureFn
