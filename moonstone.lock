@@ -1,0 +1,21 @@
+[[package]]
+artifact_hash = "b3:63e564c58aef04931d51eb752cd00979724328081f0f7de6258252dbd80d8786"
+constellation = "default"
+kind = "lib"
+link_mode = ""
+lua_abi = "5.1"
+name = "dkjson"
+recipe_hash = "b3:00f6bfc48da32dc790590b9adcf1dc246472ab0e89079852408ecbffcaa1c7d6"
+reproducible = true
+resolver = "store"
+rockspec = "https://luarocks.org/dkjson-2.9-1.rockspec"
+rockspec_hash = "b3:7e6c91ce0b4ec93b45495cb4a1e829c29a68613f8aa3106c8b11f7646bf1c2f3"
+rockspec_payload = "sources/dkjson-2.9-1.rockspec"
+roles = [ "runtime" ]
+runtime = "5.1"
+source = "https://luarocks.org/dkjson-2.9-1.src.rock"
+source_hash = "b3:08d9574d404697cfa1968177e30936701e5de66d271da62451d42ce7006f1f3a"
+source_kind = "luarocks_src_rock"
+source_payload = "sources/dkjson-2.9-1.src.rock"
+target = "native"
+version = "2.9-1"
