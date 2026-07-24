@@ -559,6 +559,7 @@ function PipelineContext:native_task(opts)
       }) .. "\n")
       file:close()
     end
+    fs.write_file(require("ballad.path").join(event_dir, "graph.json"), self._graph:to_json())
     error(
       "Native task failed: tool not found: " .. tool .. "\n\n" ..
       "Task: " .. (opts.id or description) .. "\n" ..
@@ -706,6 +707,9 @@ function PipelineContext:native_task(opts)
   end
 
   -- Fail if needed
+  if not ok or #missing_outputs > 0 then
+    fs.write_file(path.join(event_dir, "graph.json"), self._graph:to_json())
+  end
   if not ok then
     error(
       "Native task failed: " .. (opts.id or description) .. "\n\n" ..

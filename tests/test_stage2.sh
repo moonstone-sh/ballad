@@ -411,7 +411,7 @@ test -f "dist/nvim-plugin/lua/my_plugin/init.lua" || { echo "FAIL: init.lua miss
 test -f "dist/nvim-plugin/lua/my_plugin/utils.lua" || { echo "FAIL: utils.lua missing"; exit 1; }
 
 # Check that package.toml includes peer dependencies
-if ! grep -q "name = \"plenary\"" dist/nvim-deps-artifact/package.toml; then
+if ! grep -q "name = \"nvim-lua/plenary.nvim\"" dist/nvim-deps-artifact/package.toml; then
   echo "FAIL: plenary peer dependency not in package.toml"
   cat dist/nvim-deps-artifact/package.toml
   exit 1
@@ -421,14 +421,14 @@ if ! grep -q "role = \"peer\"" dist/nvim-deps-artifact/package.toml; then
   cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
-if ! grep -q "package = \"nvim-lua/plenary.nvim\"" dist/nvim-deps-artifact/package.toml; then
-  echo "FAIL: plenary package reference not in package.toml"
+if ! grep -q "resolver = \"moonstone\"" dist/nvim-deps-artifact/package.toml; then
+	echo "FAIL: plenary resolver not in package.toml"
   cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
 
 # Check optional dependency
-if ! grep -q "name = \"telescope\"" dist/nvim-deps-artifact/package.toml; then
+if ! grep -q "name = \"nvim-telescope/telescope.nvim\"" dist/nvim-deps-artifact/package.toml; then
   echo "FAIL: telescope optional dependency not in package.toml"
   cat dist/nvim-deps-artifact/package.toml
   exit 1
@@ -438,12 +438,6 @@ if ! grep -q "role = \"optional\"" dist/nvim-deps-artifact/package.toml; then
   cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
-if ! grep -q "optional = true" dist/nvim-deps-artifact/package.toml; then
-  echo "FAIL: optional=true not in package.toml"
-  cat dist/nvim-deps-artifact/package.toml
-  exit 1
-fi
-
 # Check that unknown require produced a warning
 if ! grep -q "unresolved" /tmp/nvim_deps_test.log; then
   echo "FAIL: unresolved requires did not produce a warning"

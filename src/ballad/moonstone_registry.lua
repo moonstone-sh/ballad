@@ -466,7 +466,7 @@ registry.package = function(ctx, inputs, opts)
 				dependency_entries[#dependency_entries + 1] = {
 					role = role,
 					resolver = resolver,
-					name = dep_name,
+					name = spec.package or dep_name,
 					constraint = constraint,
 				}
 			end
