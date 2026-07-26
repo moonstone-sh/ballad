@@ -113,6 +113,14 @@ export LUA_PATH
   cat "$WORK_DIR/run.log"
   exit 1
 }
+"${LUA_BIN:-luajit}" "$BALLAD_ROOT/src/main.lua" play parent.lua > "$WORK_DIR/run-again.log" 2>&1 || {
+  cat "$WORK_DIR/run-again.log"
+  exit 1
+}
+if grep -q 'Cache hit: .*ballad.plugins.moonstone.orbit' "$WORK_DIR/run-again.log"; then
+  echo "FAIL: non-cacheable orbit export reused a cached node" >&2
+  exit 1
+fi
 
 test -f "$WORK_DIR/parent-dist/child/orbits/child/dist/hello.txt"
 report="$(find "$WORK_DIR/child/.ballad/exports" -type f -name '*.json' -print -quit)"

@@ -214,6 +214,8 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
           node_options.initial = initial_options
         end
       end
+      local node_cacheable = method_contract.cacheable
+      if options.cacheable ~= nil then node_cacheable = options.cacheable end
       local node = graph:add_node({
         plugin = name,
         method = method_name,
@@ -223,7 +225,7 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
         options = node_options,
         effects = method_contract.effects or {},
         progress_weight = method_contract.progress_weight,
-        cacheable = method_contract.cacheable,
+        cacheable = node_cacheable,
         parallel_safe = method_contract.parallel_safe,
         enabled = options.enabled,
       })
