@@ -287,6 +287,15 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 
 ---@class MoonstonePlugin: PluginProxy
 ---@field project fun(opts: MoonstoneProjectOptions|nil): MoonstoneProject Read `moonstone.toml`, lockfile, and `.moonstone/env` metadata.
+---@field orbit fun(opts: MoonstoneOrbitOptions): AssetNode Run an explicitly mapped child partiture through `moon orbit exec` and import its explicit materialized sinks.
+
+---@class MoonstoneOrbitOptions
+---@field name string Root-declared Moonstone orbit name.
+---@field partiture string Child-relative partiture path.
+---@field sync 'locked'|'update'|'never'|nil Child synchronization policy; defaults to `'locked'`.
+---@field inputs string[] Child-relative source inputs required by cacheable exports.
+---@field moon string|nil Moonstone executable; defaults to `moon`.
+---@field cacheable boolean|nil Defaults to false for `sync = 'update'`.
 
 ---@class MoonstoneInputOptions
 ---@field root string|nil Project root, defaults to `.`.

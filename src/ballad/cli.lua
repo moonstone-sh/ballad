@@ -1,5 +1,8 @@
 local process = require("ballad.process")
 local partiture = require("ballad.partiture")
+local fs = require("ballad.fs")
+local path = require("ballad.path")
+local dkjson = require("dkjson")
 
 local cli = {}
 
@@ -14,7 +17,7 @@ local function print_help()
   print("Usage: ballad <command> [args]")
   print("")
   print("Commands:")
-  print("  play <file> [-- args…]  Execute a partiture.lua pipeline script (default)")
+  print("  play <file> [--report <path>] [-- args…]  Execute a partiture.lua pipeline script (default)")
   print("  init <template>   Scaffold a partiture.lua from a template")
   print("  action-run <file> Execute a serialized native action (watcher internal)")
   print("  help              Show this help message")
@@ -26,6 +29,51 @@ local function print_help()
   print("")
   print("Flags:")
   print("  --jobs, -j <n>    Run native tasks with up to n jobs")
+  print("  --report <path>   Write explicit sink results as a machine-readable JSON report")
+end
+
+local function write_report(report_path, partiture_file, results)
+  local root = process.capture("pwd -P")
+  local sinks = {}
+  for index, sink in ipairs(results) do
+    local assets = {}
+    for _, asset in ipairs((sink.result and sink.result.assets) or {}) do
+      local source_path = asset.source_path or asset.output_path
+      local relative_path = nil
+      if source_path then
+        local absolute = path.absolute(source_path)
+        if absolute == root or absolute:sub(1, #root + 1) == root .. "/" then
+          relative_path = path.relative(absolute, root)
+        else
+          process.fail("refusing to report an asset outside the partiture project: " .. absolute)
+        end
+      end
+      assets[#assets + 1] = {
+        id = asset.id,
+        kind = asset.kind,
+        path = relative_path,
+        virtual_path = asset.virtual_path,
+        metadata = asset.metadata,
+      }
+    end
+    sinks[#sinks + 1] = {
+      id = sink.node.id,
+      method = sink.node.method,
+      assets = assets,
+    }
+  end
+
+  fs.mkdir(path.dirname(report_path))
+  local temporary = report_path .. ".tmp"
+  fs.write_file(temporary, dkjson.encode({
+    version = 1,
+    root = ".",
+    partiture = partiture_file,
+    sinks = sinks,
+  }) .. "\n")
+  if not process.command_ok("mv " .. process.quote(temporary) .. " " .. process.quote(report_path)) then
+    process.fail("cannot finalize Ballad report at " .. report_path)
+  end
 end
 
 function cli.parse_args(args)
@@ -34,6 +82,7 @@ function cli.parse_args(args)
     partiture_file = nil,
     template = nil,
     jobs = 1,
+    report_path = nil,
     invocation_args = {},
   }
 
@@ -53,6 +102,9 @@ function cli.parse_args(args)
     elseif arg_value == "--jobs" or arg_value == "-j" then
       index = index + 1
       options.jobs = tonumber(args[index]) or 1
+    elseif arg_value == "--report" then
+      index = index + 1
+      options.report_path = args[index] or process.fail("--report requires a path")
     elseif arg_value == "--help" or arg_value == "help" then
       print_help()
       os.exit(0)
@@ -107,6 +159,9 @@ function cli.main(args)
     print("Partiture loaded: " .. options.partiture_file)
     print("Executing pipeline graph...")
     local results = p:execute()
+    if options.report_path then
+      write_report(options.report_path, options.partiture_file, results)
+    end
     print("Pipeline completed. " .. #results .. " explicit sink(s) produced output.")
     for i, sink in ipairs(results) do
       print("  Output " .. i .. ": " .. sink.node.method)

@@ -60,6 +60,8 @@ jobs:
             ./tests/test_watcher.sh
             ./tests/test_native_action.sh
             ./tests/test_invocation_args.sh
+            ./tests/test_orbit_report.sh
+            ./tests/test_orbit_integration.sh
             ./tests/test_publish_verification.sh
           '
           moon run play

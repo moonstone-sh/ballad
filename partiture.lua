@@ -14,7 +14,6 @@ return ballad.partiture(function(p)
 		bin = "ballad",
 		interpreter = "luajit",
 		include = {
-			"moonstone.toml",
 			"src/**",
 		},
 	})

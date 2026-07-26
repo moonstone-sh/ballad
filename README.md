@@ -97,6 +97,50 @@ Run `moon sync` before evaluating the partiture. Moonstone owns resolution and
 ABI selection; Ballad consumes the resulting private tool scope as sources for
 the exported executable.
 
+## Orbit Exports
+
+Moonstone orbits stay independent projects. The root partiture explicitly maps
+an orbit to a child partiture; Ballad never infers that every orbit should be
+exported or published.
+
+```lua
+local ballad = require("ballad")
+
+return ballad.partiture(function(p)
+  local moonstone = p:use(ballad.plugins.moonstone)
+
+  local service = moonstone.orbit({
+    name = "basic-service",
+    partiture = "partiture.lua",
+    sync = "locked",
+    inputs = {
+      "moonstone.toml",
+      "moonstone.lock",
+      "partiture.lua",
+      "src/**",
+    },
+  })
+
+  p.sink.directory(service, { out = "dist/examples/basic-service", file_graph = true })
+end)
+```
+
+`moonstone.orbit` resolves the member through Moonstone, synchronizes it when
+requested, and executes `ballad play` through `moon orbit exec`. That preserves
+the child working directory, interpreter, tool closure, and native-module ABI
+scope. The child partiture owns its explicit sinks; Ballad writes a temporary
+report and imports every materialized child sink into the parent graph with
+orbit provenance.
+
+Use `sync = "locked"` for reproducible exports. It requires the child lockfile
+to be current. `sync = "update"` is for intentionally lockless examples and
+development projects; it refreshes the child environment and is non-cacheable
+by default. `sync = "never"` requires a previously synchronized child.
+
+Orbit imports never create a registry package on their own. A child partiture
+may publish an artifact explicitly, or the parent may explicitly package the
+imported assets. This keeps project closure and release policy separate.
+
 ## Native Tasks & Script Execution
 
 Run Moonstone project scripts (`moon run <script>`) or arbitrary commands (`moon exec <cmd>`) with content-addressed input caching and output verification:

@@ -28,6 +28,14 @@
 ---@field parallel_safe? boolean whether this task can run concurrently with non-overlapping tasks (default true)
 ---@field cacheable? boolean whether native task caching is enabled (default true)
 
+---@class MoonstoneOrbitOpts
+---@field name string root-declared Moonstone orbit name
+---@field partiture string child-relative partiture path
+---@field sync? 'locked'|'update'|'never' child environment policy (default 'locked')
+---@field inputs string[] child-relative input files or globs required for cacheable exports
+---@field moon? string path or name of Moonstone binary (default 'moon')
+---@field cacheable? boolean whether the parent orbit task is cacheable (defaults false for sync='update')
+
 local graph = require("ballad.graph")
 local project_mod = require("ballad.project")
 local moonstone_input = require("ballad.plugins.input.moonstone")
@@ -264,6 +272,105 @@ local function tool_scope_assets(ctx, project_asset, opts)
   return assets
 end
 
+local function canonical_dir(value)
+  if not process.command_ok("test -d " .. process.quote(value)) then
+    error("moonstone.orbit: directory does not exist: " .. value)
+  end
+  local resolved = process.capture("cd " .. process.quote(value) .. " && pwd -P")
+  if resolved == "" then error("moonstone.orbit: cannot resolve directory: " .. value) end
+  return resolved
+end
+
+local function resolve_orbit(root, name)
+  local manifest = fs.read_file(path.join(root, "moonstone.toml"))
+  if not manifest then error("moonstone.orbit: missing root moonstone.toml in " .. root) end
+
+  local current = nil
+  for raw_line in manifest:gmatch("[^\r\n]+") do
+    local line = raw_line:match("^%s*(.-)%s*$")
+    if line == "[[orbits.member]]" then
+      if current and current.name == name and current.path then break end
+      current = {}
+    elseif current then
+      local key, value = line:match('^([%w_]+)%s*=%s*"(.-)"%s*$')
+      if key then current[key] = value end
+    end
+  end
+
+  if not current or current.name ~= name or not current.path then
+    error("moonstone.orbit: unknown root-declared orbit '" .. name .. "'")
+  end
+
+  local child = canonical_dir(path.join(root, current.path))
+  if child ~= root and child:sub(1, #root + 1) ~= root .. "/" then
+    error("moonstone.orbit: orbit path escapes the root project: " .. current.path)
+  end
+  if not fs.read_file(path.join(child, "moonstone.toml")) then
+    error("moonstone.orbit: orbit '" .. name .. "' has no moonstone.toml")
+  end
+  return child
+end
+
+local function child_input_paths(child_root, inputs)
+  local result = {}
+  for _, value in ipairs(inputs or {}) do
+    if type(value) ~= "string" then error("moonstone.orbit: inputs must be child-relative strings") end
+    result[#result + 1] = path.join(child_root, value)
+  end
+  return result
+end
+
+local function import_orbit_report(ctx, orbit_name, child_root, report_path)
+  local content = fs.read_file(report_path)
+  if not content then error("moonstone.orbit: child did not produce report " .. report_path) end
+  local report, _, err = dkjson.decode(content)
+  if not report or report.version ~= 1 or type(report.sinks) ~= "table" then
+    error("moonstone.orbit: invalid child report: " .. tostring(err or "unsupported schema"))
+  end
+
+  local assets = graph.AssetSet.new()
+  for _, sink in ipairs(report.sinks) do
+    for _, recorded in ipairs(sink.assets or {}) do
+      if not recorded.path or recorded.path == "" then
+        error("moonstone.orbit: sink '" .. tostring(sink.id) .. "' contains an unsupported non-materialized asset")
+      end
+      local source_path = path.absolute(path.join(child_root, recorded.path))
+      if source_path ~= child_root and source_path:sub(1, #child_root + 1) ~= child_root .. "/" then
+        error("moonstone.orbit: child report asset escapes orbit root: " .. tostring(recorded.path))
+      end
+      if not fs.read_file(source_path) and not fs.is_dir(source_path) then
+        error("moonstone.orbit: reported sink asset is missing: " .. source_path)
+      end
+      local metadata = {
+        orbit = orbit_name,
+        orbit_sink = sink.id,
+        orbit_sink_method = sink.method,
+        orbit_root = child_root,
+        child_metadata = recorded.metadata,
+      }
+      local virtual_root = path.join("orbits", orbit_name, recorded.virtual_path or recorded.path)
+      if fs.is_dir(source_path) then
+        for _, child_file in ipairs(fs.list_files(source_path)) do
+          assets:add(ctx.graph:add_asset({
+            kind = "file",
+            source_path = child_file,
+            virtual_path = path.join(virtual_root, path.relative(child_file, source_path)),
+            metadata = metadata,
+          }))
+        end
+      else
+        assets:add(ctx.graph:add_asset({
+          kind = recorded.kind or "file",
+          source_path = source_path,
+          virtual_path = virtual_root,
+          metadata = metadata,
+        }))
+      end
+    end
+  end
+  return assets
+end
+
 local moonstone_registry = require("ballad.moonstone_registry")
 
 return {
@@ -293,6 +400,12 @@ return {
       outputs = { "asset_set" },
       cacheable = false,
       parallel_safe = true,
+    },
+    orbit = {
+      inputs = {},
+      outputs = { "asset_set" },
+      cacheable = true,
+      parallel_safe = false,
     },
     registry_package = {
       inputs = { "asset_set" },
@@ -554,6 +667,57 @@ return {
       description = opts.description or ("moon exec " .. command_str),
     }
     return ctx:native_task(task_opts)
+  end,
+
+  ---Run a child partiture in the selected orbit's isolated Moonstone scope.
+  ---The child owns its sinks; this node imports every reported materialized sink.
+  ---@param ctx PluginCtx
+  ---@param inputs AssetSet[]
+  ---@param opts MoonstoneOrbitOpts
+  ---@return AssetSet
+  orbit = function(ctx, inputs, opts)
+    opts = opts or {}
+    local orbit_name = opts.name or error("moonstone.orbit: missing orbit name")
+    local partiture_file = opts.partiture or error("moonstone.orbit: missing child partiture")
+    local sync_mode = opts.sync or "locked"
+    if sync_mode ~= "locked" and sync_mode ~= "update" and sync_mode ~= "never" then
+      error("moonstone.orbit: sync must be 'locked', 'update', or 'never'")
+    end
+    if opts.cacheable ~= false and sync_mode ~= "update" and #(opts.inputs or {}) == 0 then
+      error("moonstone.orbit: cacheable exports require explicit child-relative inputs")
+    end
+
+    local root = canonical_dir(opts.root or ".")
+    local child_root = resolve_orbit(root, orbit_name)
+    local child_partiture = path.join(child_root, partiture_file)
+    if not fs.read_file(child_partiture) then
+      error("moonstone.orbit: partiture not found in orbit '" .. orbit_name .. "': " .. partiture_file)
+    end
+
+    local report_path = path.join(child_root, ".ballad", "orbit-reports", (opts.id or orbit_name) .. ".json")
+    local moon_bin = find_moon_cli(opts)
+    local command = "set -eu; "
+    if sync_mode ~= "never" then
+      command = command .. process.quote(moon_bin) .. " orbit sync " .. process.quote(orbit_name) .. " --" .. sync_mode .. "; "
+    end
+    command = command
+      .. process.quote(moon_bin) .. " orbit exec " .. process.quote(orbit_name)
+      .. " -- ballad play " .. process.quote(partiture_file)
+      .. " --report " .. process.quote(path.relative(report_path, child_root))
+
+    ctx:native_task({
+      id = opts.id or ("moonstone.orbit:" .. orbit_name),
+      tool = "sh",
+      args = { "-c", command },
+      inputs = child_input_paths(child_root, opts.inputs or {}),
+      outputs = { report_path },
+      cwd = root,
+      cacheable = opts.cacheable ~= false and sync_mode ~= "update",
+      parallel_safe = false,
+      description = opts.description or ("export orbit " .. orbit_name),
+    })
+
+    return import_orbit_report(ctx, orbit_name, child_root, report_path)
   end,
 
   registry_package = function(ctx, inputs, opts)
