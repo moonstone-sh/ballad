@@ -328,7 +328,7 @@ local function child_lua_paths(root, child_root, lua_paths)
     if resolved ~= root and resolved:sub(1, #root + 1) ~= root .. "/" then
       error("moonstone.orbit: lua_path escapes the parent project: " .. value)
     end
-    result[#result + 1] = path.relative(resolved, child_root)
+    result[#result + 1] = value
   end
   return result
 end

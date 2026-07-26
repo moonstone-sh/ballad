@@ -5,7 +5,7 @@ BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-orbit-integration.XXXXXX)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-mkdir -p "$WORK_DIR/child/input"
+mkdir -p "$WORK_DIR/child/input" "$WORK_DIR/plugins"
 cat > "$WORK_DIR/moonstone.toml" <<'TOML'
 [package]
 name = "orbit-root"
@@ -41,8 +41,12 @@ role = "tool"
 TOML
 
 printf 'orbit export\n' > "$WORK_DIR/child/input/hello.txt"
+cat > "$WORK_DIR/plugins/orbit_marker.lua" <<'LUA'
+return { value = "loaded" }
+LUA
 cat > "$WORK_DIR/child/partiture.lua" <<'LUA'
 local ballad = require("ballad")
+assert(require("orbit_marker").value == "loaded")
 
 return ballad.partiture(function(p)
   local input = p.source.directory("input", { include = { "**" } })
@@ -60,7 +64,8 @@ return ballad.partiture(function(p)
     partiture = "partiture.lua",
     sync = "update",
     cacheable = false,
-    inputs = { "moonstone.toml", "partiture.lua", "input/**" },
+    inputs = { "moonstone.toml", "partiture.lua", "input/**", "../plugins/**" },
+    lua_paths = { "../plugins" },
   })
   p.sink.directory(child, { out = "parent-dist", file_graph = true })
 end)
