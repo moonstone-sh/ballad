@@ -109,9 +109,9 @@ local ballad = require("ballad")
 return ballad.partiture(function(p)
   local moonstone = p:use(ballad.plugins.moonstone)
 
-  local service = moonstone.orbit({
-    name = "basic-service",
-    partiture = "partiture.lua",
+  local service = moonstone.orbit("basic-service")
+    :partiture("partiture.lua")
+    :run({
     sync = "locked",
     inputs = {
       "moonstone.toml",
@@ -121,16 +121,64 @@ return ballad.partiture(function(p)
     },
   })
 
-  p.sink.directory(service, { out = "dist/examples/basic-service", file_graph = true })
+  p.sink.directory(service.product("release"), {
+    out = "dist/examples/basic-service",
+    file_graph = true,
+  })
 end)
 ```
 
-`moonstone.orbit` resolves the member through Moonstone, synchronizes it when
-requested, and executes `ballad play` through `moon orbit exec`. That preserves
+`moonstone.orbit("name")` only addresses an immediate child. Its
+`:partiture(path):run(opts)` invocation resolves the member through Moonstone,
+synchronizes it when requested, and executes `ballad play` through `moon orbit exec`. That preserves
 the child working directory, interpreter, tool closure, and native-module ABI
-scope. The child partiture owns its explicit sinks; Ballad writes a temporary
-report and imports every materialized child sink into the parent graph with
-orbit provenance.
+scope. The returned handle is a **product catalog**, not an asset set: select a
+child-declared product before any parent sink, layout, or package can consume it.
+
+The child names release-worthy sinks explicitly:
+
+```lua
+p.sink.directory(release, {
+  out = "dist/release",
+  product = "release",
+})
+```
+
+Then a parent can compose only those products it deliberately ships:
+
+```lua
+local api = moonstone.orbit("api"):partiture("release.lua"):run({
+  sync = "locked",
+  args = { "--profile", "production" },
+})
+local worker = moonstone.orbit("worker"):partiture("release.lua"):run({
+  sync = "locked",
+  args = { "--profile", "production" },
+})
+
+local layout = p:use(ballad.plugins.layout)
+local suite = layout.directory({
+  { from = api.product("release"), to = "api" },
+  { from = worker.product("release"), to = "worker" },
+})
+
+local package = p.registry.package(suite, {
+  name = "acme/platform-suite",
+  version = "1.0.0",
+})
+p.sink.artifact(package, { out = "dist/registry/platform-suite" })
+```
+
+An unselected orbit handle is rejected. Unnamed child sinks are not export
+products, and nested orbits remain child-owned: the parent receives only the
+materialized products reported by its immediate child. Ballad never flattens
+locks, runtimes, tools, or native module scopes across those boundaries.
+
+Each invocation writes a child-local `.ballad/exports/<fingerprint>.json`
+report. It records the invocation arguments, final graph fingerprint, observed
+source closure, and named products. A later matching invocation folds that
+observed closure back into its cache inputs, so source-domain changes invalidate
+the child export without making its runtime or tool scope part of the parent.
 
 When a source-tree recipe needs an additional **pure-Lua** plugin, declare its
 parent-contained root explicitly with `lua_paths` and include that source in
@@ -144,8 +192,9 @@ development projects; it refreshes the child environment and is non-cacheable
 by default. `sync = "never"` requires a previously synchronized child.
 
 Orbit imports never create a registry package on their own. A child partiture
-may publish an artifact explicitly, or the parent may explicitly package the
-imported assets. This keeps project closure and release policy separate.
+may publish an artifact explicitly, or the parent may explicitly package a
+selected composed product. This keeps project closure and release policy
+separate.
 
 ## Native Tasks & Script Execution
 

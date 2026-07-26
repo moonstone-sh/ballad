@@ -84,6 +84,54 @@ local function source_is_in_roots(source, roots)
   return false
 end
 
+local function directory_destination(value)
+  if type(value) ~= "string" then error("layout.directory entries require a string .to destination") end
+  if value == "" or value == "." then return "" end
+  if value:sub(1, 1) == "/" then error("layout.directory destinations must be relative") end
+  for segment in value:gmatch("[^/]+") do
+    if segment == "." or segment == ".." then
+      error("layout.directory destinations cannot contain . or .. segments")
+    end
+  end
+  return value:gsub("/+$", "")
+end
+
+local function compose_directory(ctx, inputs, opts)
+  opts = opts or {}
+  local entries = opts.entries or {}
+  if #entries == 0 then error("layout.directory requires at least one product entry") end
+  if #entries ~= #inputs then error("layout.directory received an invalid product entry mapping") end
+
+  local assets = graph.AssetSet.new()
+  local destinations = {}
+  for index, input in ipairs(inputs) do
+    local destination_root = directory_destination(entries[index].to)
+    for _, asset in ipairs(input.assets or {}) do
+      if not asset.virtual_path or asset.virtual_path == "" then
+        error("layout.directory can only compose materialized product assets")
+      end
+      local destination = destination_root == "" and asset.virtual_path or path.join(destination_root, asset.virtual_path)
+      if destinations[destination] then error("layout.directory destination collision: " .. destination) end
+      destinations[destination] = true
+      assets:add(ctx.graph:add_asset({
+        kind = asset.kind,
+        source_path = asset.source_path,
+        output_path = asset.output_path,
+        virtual_path = destination,
+        content = asset.content,
+        generated = asset.generated,
+        metadata = asset.metadata,
+      }))
+    end
+  end
+  assets:add(ctx.graph:add_asset({
+    kind = "files",
+    virtual_path = "directory-root",
+    metadata = { layout = "directory", kind = opts.kind or "suite" },
+  }))
+  return assets
+end
+
 local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
   opts = opts or {}
   local project_asset = inputs[1].assets[1]
@@ -306,6 +354,13 @@ return {
       cacheable = false,
       parallel_safe = true,
     },
+    directory = {
+      inputs = { "asset_set" },
+      outputs = { "asset_set" },
+      inputs_from_entries = true,
+      cacheable = true,
+      parallel_safe = true,
+    },
   },
 
   ---@param ctx PluginCtx
@@ -329,6 +384,15 @@ return {
       end
     end
     return build_libexec_layout(ctx, inputs, opts, "exec", "exec")
+  end,
+
+  ---Compose explicitly selected products into a directory-shaped layout.
+  ---@param ctx PluginCtx
+  ---@param inputs AssetSet[]
+  ---@param opts table
+  ---@return AssetSet
+  directory = function(ctx, inputs, opts)
+    return compose_directory(ctx, inputs, opts)
   end,
 
   ---@param ctx PluginCtx

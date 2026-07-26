@@ -32,7 +32,8 @@
 ---@field name string root-declared Moonstone orbit name
 ---@field partiture string child-relative partiture path
 ---@field sync? 'locked'|'update'|'never' child environment policy (default 'locked')
----@field inputs string[] child-relative input files or globs required for cacheable exports
+---@field inputs? string[]|AssetSet[] additional child-relative cache inputs; Ballad also reuses observed source inputs from the prior matching export report
+---@field args? string[] arguments forwarded to the child partiture after `--`
 ---@field moon? string path or name of Moonstone binary (default 'moon')
 ---@field cacheable? boolean whether the parent orbit task is cacheable (defaults false for sync='update')
 
@@ -320,6 +321,52 @@ local function child_input_paths(child_root, inputs)
   return result
 end
 
+local function child_relative_path(value)
+  if type(value) ~= "string" or value == "" or value:sub(1, 1) == "/" or value:match("^%.%.?/") or value:find("/%.%.?/") then
+    return nil
+  end
+  return value
+end
+
+local function invocation_fingerprint(orbit_name, child_root, partiture_file, args, lua_paths)
+  local parts = { "orbit", orbit_name, child_root, partiture_file }
+  for _, value in ipairs(args or {}) do
+    parts[#parts + 1] = "arg:" .. #value .. ":" .. value
+  end
+  for _, value in ipairs(lua_paths or {}) do
+    parts[#parts + 1] = "lua_path:" .. #value .. ":" .. value
+  end
+  return process.b3sum_string(table.concat(parts, "\0"))
+end
+
+local function observed_input_paths(child_root, report_path)
+  local content = fs.read_file(report_path)
+  if not content then return {} end
+  local report = dkjson.decode(content)
+  local result = {}
+  for _, input in ipairs(report and report.invocation and report.invocation.inputs or {}) do
+    local relative = child_relative_path(input.path)
+    if relative then result[#result + 1] = path.join(child_root, relative) end
+  end
+  return result
+end
+
+local function orbit_input_paths(child_root, partiture_file, inputs, report_path)
+  local paths = { path.join(child_root, "moonstone.toml"), path.join(child_root, partiture_file) }
+  local lockfile = path.join(child_root, "moonstone.lock")
+  if fs.read_file(lockfile) then paths[#paths + 1] = lockfile end
+  for _, value in ipairs(child_input_paths(child_root, inputs)) do paths[#paths + 1] = value end
+  for _, value in ipairs(observed_input_paths(child_root, report_path)) do paths[#paths + 1] = value end
+  local seen, unique = {}, {}
+  for _, value in ipairs(paths) do
+    if not seen[value] then
+      seen[value] = true
+      unique[#unique + 1] = value
+    end
+  end
+  return unique
+end
+
 local function child_lua_paths(root, child_root, lua_paths)
   local result = {}
   for _, value in ipairs(lua_paths or {}) do
@@ -333,17 +380,32 @@ local function child_lua_paths(root, child_root, lua_paths)
   return result
 end
 
-local function import_orbit_report(ctx, orbit_name, child_root, report_path)
+local function import_orbit_report(ctx, orbit_name, child_root, report_path, invocation)
   local content = fs.read_file(report_path)
   if not content then error("moonstone.orbit: child did not produce report " .. report_path) end
   local report, _, err = dkjson.decode(content)
-  if not report or report.version ~= 1 or type(report.sinks) ~= "table" then
+  if not report or report.version ~= 2 or type(report.sinks) ~= "table" then
     error("moonstone.orbit: invalid child report: " .. tostring(err or "unsupported schema"))
+  end
+  if not report.invocation or report.invocation.fingerprint ~= invocation then
+    error("moonstone.orbit: child report does not match the requested partiture invocation")
   end
 
   local assets = graph.AssetSet.new()
+  local products = {}
   for _, sink in ipairs(report.sinks) do
+    local product = sink.product
+    if product ~= nil and (type(product) ~= "string" or not product:match("^[a-z][a-z0-9_-]*$")) then
+      error("moonstone.orbit: child report has an invalid product name")
+    end
+    if product then
+      if products[product] then
+        error("moonstone.orbit: child report defines product '" .. product .. "' more than once")
+      end
+      products[product] = true
+    end
     for _, recorded in ipairs(sink.assets or {}) do
+      if not product then goto continue end
       if not recorded.path or recorded.path == "" then
         error("moonstone.orbit: sink '" .. tostring(sink.id) .. "' contains an unsupported non-materialized asset")
       end
@@ -356,6 +418,7 @@ local function import_orbit_report(ctx, orbit_name, child_root, report_path)
       end
       local metadata = {
         orbit = orbit_name,
+        orbit_product = product,
         orbit_sink = sink.id,
         orbit_sink_method = sink.method,
         orbit_root = child_root,
@@ -379,7 +442,11 @@ local function import_orbit_report(ctx, orbit_name, child_root, report_path)
           metadata = metadata,
         }))
       end
+      ::continue::
     end
+  end
+  if not next(products) then
+    error("moonstone.orbit: child report exposes no named products; declare p.sink.*(..., { product = \"release\" })")
   end
   return assets
 end
@@ -683,11 +750,17 @@ return {
   end,
 
   ---Run a child partiture in the selected orbit's isolated Moonstone scope.
-  ---The child owns its sinks; this node imports every reported materialized sink.
+  ---The child owns named products; select one with `orbit.product("name")` before consuming it.
   ---@param ctx PluginCtx
   ---@param inputs AssetSet[]
   ---@param opts MoonstoneOrbitOpts
   ---@return AssetSet
+  orbit_prepare = function(opts)
+    opts = opts or {}
+    local orbit_name = opts.name or error("moonstone.orbit: missing orbit name")
+    return { _orbit_export = { name = orbit_name } }
+  end,
+
   orbit = function(ctx, inputs, opts)
     opts = opts or {}
     local orbit_name = opts.name or error("moonstone.orbit: missing orbit name")
@@ -696,10 +769,6 @@ return {
     if sync_mode ~= "locked" and sync_mode ~= "update" and sync_mode ~= "never" then
       error("moonstone.orbit: sync must be 'locked', 'update', or 'never'")
     end
-    if opts.cacheable ~= false and sync_mode ~= "update" and #(opts.inputs or {}) == 0 then
-      error("moonstone.orbit: cacheable exports require explicit child-relative inputs")
-    end
-
     local root = canonical_dir(opts.root or ".")
     local child_root = resolve_orbit(root, orbit_name)
     local child_partiture = path.join(child_root, partiture_file)
@@ -707,35 +776,43 @@ return {
       error("moonstone.orbit: partiture not found in orbit '" .. orbit_name .. "': " .. partiture_file)
     end
 
-    local report_path = path.join(child_root, ".ballad", "orbit-reports", (opts.id or orbit_name) .. ".json")
     local lua_paths = child_lua_paths(root, child_root, opts.lua_paths)
+    local args = opts.args or {}
+    local invocation = invocation_fingerprint(orbit_name, child_root, partiture_file, args, lua_paths)
+    local report_path = path.join(child_root, ".ballad", "exports", invocation .. ".json")
     local moon_bin = find_moon_cli(opts)
     local command = "set -eu; "
     if sync_mode ~= "never" then
       command = command .. process.quote(moon_bin) .. " orbit sync " .. process.quote(orbit_name) .. " --" .. sync_mode .. "; "
     end
     command = command
-      .. process.quote(moon_bin) .. " orbit exec " .. process.quote(orbit_name)
+      .. "BALLAD_ORBIT_NAME=" .. process.quote(orbit_name)
+      .. " BALLAD_EXPORT_FINGERPRINT=" .. process.quote(invocation)
+      .. " " .. process.quote(moon_bin) .. " orbit exec " .. process.quote(orbit_name)
       .. " -- ballad play " .. process.quote(partiture_file)
     for _, lua_path in ipairs(lua_paths) do
       command = command .. " --lua-path " .. process.quote(lua_path)
     end
     command = command
       .. " --report " .. process.quote(path.relative(report_path, child_root))
+    if #args > 0 then
+      command = command .. " --"
+      for _, value in ipairs(args) do command = command .. " " .. process.quote(value) end
+    end
 
     ctx:native_task({
       id = opts.id or ("moonstone.orbit:" .. orbit_name),
       tool = "sh",
       args = { "-c", command },
-      inputs = child_input_paths(child_root, opts.inputs or {}),
+      inputs = orbit_input_paths(child_root, partiture_file, opts.inputs or {}, report_path),
       outputs = { report_path },
       cwd = root,
       cacheable = opts.cacheable ~= false and sync_mode ~= "update",
       parallel_safe = false,
-      description = opts.description or ("export orbit " .. orbit_name),
+      description = opts.description or ("export orbit " .. orbit_name .. " partiture " .. partiture_file),
     })
 
-    return import_orbit_report(ctx, orbit_name, child_root, report_path)
+    return import_orbit_report(ctx, orbit_name, child_root, report_path, invocation)
   end,
 
   registry_package = function(ctx, inputs, opts)

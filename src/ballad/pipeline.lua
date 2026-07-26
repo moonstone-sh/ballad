@@ -18,6 +18,11 @@ function NodeHandle.new(id, graph, extra_meta)
       self[k] = v
     end
   end
+  if self._orbit_export then
+    self.product = function(first, second)
+      return self:_select_orbit_product(second or first)
+    end
+  end
   return self
 end
 
@@ -28,6 +33,88 @@ end
 function NodeHandle:metadata()
   local node = self._graph.nodes[self._id]
   return node and node.metadata or nil
+end
+
+function NodeHandle:_select_orbit_product(name)
+  local orbit = self._orbit_export
+  if not orbit then error("product selection is only available on moonstone.orbit nodes") end
+  if type(name) ~= "string" or not name:match("^[a-z][a-z0-9_-]*$") then
+    error("orbit product names must match ^[a-z][a-z0-9_-]*$")
+  end
+  local node = self._graph:add_node({
+    plugin = "ballad.core.transform",
+    method = "orbit_product",
+    role = "transform",
+    label = "orbit product " .. orbit.name .. ":" .. name,
+    inputs = { self._id },
+    options = { orbit = orbit.name, product = name },
+    effects = {},
+    cacheable = false,
+    parallel_safe = true,
+  })
+  return NodeHandle.new(node.id, self._graph, {
+    orbit_product = { orbit = orbit.name, name = name },
+  })
+end
+
+function NodeHandle:product(name)
+  return self:_select_orbit_product(name)
+end
+
+local function require_selected_orbit(handle, consumer)
+  if handle._orbit_export then
+    error(
+      consumer .. " cannot consume an unselected moonstone.orbit export; " ..
+      "select a named child product first, for example orbit.product(\"release\")"
+    )
+  end
+end
+
+---@class OrbitReference
+---@field _proxy PluginProxy
+---@field name string
+local OrbitReference = {}
+OrbitReference.__index = OrbitReference
+
+---@class OrbitPartitureReference
+---@field _orbit OrbitReference
+---@field path string
+local OrbitPartitureReference = {}
+OrbitPartitureReference.__index = OrbitPartitureReference
+
+local function validate_orbit_partiture_path(value)
+  if type(value) ~= "string" or value == "" then
+    error("orbit.partiture requires a non-empty child-relative path")
+  end
+  if value:sub(1, 1) == "/" or value:match("^%.%.?/") or value:find("/%.%.?/") then
+    error("orbit.partiture paths must stay within the child project")
+  end
+  return value
+end
+
+function OrbitReference.new(proxy, name)
+  if type(name) ~= "string" or name == "" then error("moonstone.orbit requires a non-empty orbit name") end
+  return setmetatable({ _proxy = proxy, name = name }, OrbitReference)
+end
+
+function OrbitReference:partiture(partiture_path)
+  return setmetatable({ _orbit = self, path = validate_orbit_partiture_path(partiture_path) }, OrbitPartitureReference)
+end
+
+function OrbitPartitureReference:run(opts)
+  opts = opts or {}
+  if type(opts) ~= "table" then error("orbit.partiture(...):run expects an options table") end
+  if opts.args ~= nil then
+    if type(opts.args) ~= "table" then error("orbit partiture args must be an array of strings") end
+    for _, value in ipairs(opts.args) do
+      if type(value) ~= "string" then error("orbit partiture args must be strings") end
+    end
+  end
+  local invocation = {}
+  for key, value in pairs(opts) do invocation[key] = value end
+  invocation.name = self._orbit.name
+  invocation.partiture = self.path
+  return self._orbit._proxy.orbit(invocation)
 end
 
 ---@class PluginProxy
@@ -51,11 +138,28 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
       if args[1] == self then
         table.remove(args, 1)
       end
+      if (name == "moonstone" or name == "ballad.plugins.moonstone") and method_name == "orbit" and #args == 1 and type(args[1]) == "string" then
+        return OrbitReference.new(self, args[1])
+      end
       local inputs = {}
       local options = {}
-      if #args >= 2 then
+      if method_contract.inputs_from_entries then
+        if #args ~= 1 or type(args[1]) ~= "table" then
+          error(name .. "." .. method_name .. " expects an array of { from = node, to = path } entries")
+        end
+        options.entries = {}
+        for index, entry in ipairs(args[1]) do
+          if type(entry) ~= "table" or getmetatable(entry.from) ~= NodeHandle then
+            error(name .. "." .. method_name .. " entry " .. index .. " requires a node handle in .from")
+          end
+          require_selected_orbit(entry.from, name .. "." .. method_name)
+          table.insert(inputs, entry.from._id)
+          options.entries[index] = { to = entry.to }
+        end
+      elseif #args >= 2 then
         local first = table.remove(args, 1)
         if type(first) == "table" and getmetatable(first) == NodeHandle then
+          require_selected_orbit(first, name .. "." .. method_name)
           table.insert(inputs, first._id)
           if type(args[1]) == "table" then
             options = args[1]
@@ -76,6 +180,7 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
       elseif #args == 1 then
         local first = args[1]
         if type(first) == "table" and getmetatable(first) == NodeHandle then
+          require_selected_orbit(first, name .. "." .. method_name)
           table.insert(inputs, first._id)
         elseif type(first) == "string" then
           options[1] = first
@@ -304,9 +409,15 @@ end
 function PipelineContext:_core_node(plugin, method, inputs, opts, mutate_opts)
   opts = opts or {}
   if mutate_opts then mutate_opts(opts) end
+  if plugin == "ballad.core.sink" and opts.product ~= nil then
+    if type(opts.product) ~= "string" or not opts.product:match("^[a-z][a-z0-9_-]*$") then
+      error("sink product names must match ^[a-z][a-z0-9_-]*$")
+    end
+  end
   local input_ids = {}
   for _, inp in ipairs(inputs or {}) do
     if type(inp) == "table" and getmetatable(inp) == NodeHandle then
+      require_selected_orbit(inp, plugin .. "." .. method)
       table.insert(input_ids, inp._id)
     elseif inp ~= nil then
       error(method .. " expects pipeline node handles as inputs")
@@ -421,6 +532,7 @@ function PipelineContext:node(plugin, method, inputs, opts)
   local input_ids = {}
   for _, inp in ipairs(inputs or {}) do
     if type(inp) == "table" and getmetatable(inp) == NodeHandle then
+      require_selected_orbit(inp, plugin .. "." .. method)
       table.insert(input_ids, inp._id)
     end
   end
@@ -1093,6 +1205,20 @@ local function core_handler(plugin, method)
             native_action = true,
           },
         }))
+      end
+      return assets
+    end
+  elseif plugin == "ballad.core.transform" and method == "orbit_product" then
+    return function(ctx, input_results, opts)
+      local assets = graph_mod.AssetSet.new()
+      for _, asset in ipairs((input_results[1] and input_results[1].assets) or {}) do
+        local metadata = asset.metadata or {}
+        if metadata.orbit == opts.orbit and metadata.orbit_product == opts.product then
+          assets:add(asset)
+        end
+      end
+      if assets:count() == 0 then
+        ctx.fail("orbit '" .. opts.orbit .. "' did not report a materialized product named '" .. opts.product .. "'")
       end
       return assets
     end

@@ -31,7 +31,8 @@ luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua --lua-path plugins --repor
 }
 
 test -f .ballad/orbit-report.json
-grep -q '"version":1' .ballad/orbit-report.json
+grep -q '"version":2' .ballad/orbit-report.json
+grep -q '"graph_fingerprint":"b3:' .ballad/orbit-report.json
 grep -q '"path":"dist"' .ballad/orbit-report.json
 
 echo "PASS: ballad play writes explicit sink report"

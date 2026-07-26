@@ -33,7 +33,33 @@ local function print_help()
   print("  --lua-path <dir>  Prepend a pure-Lua module root before loading the partiture (repeatable)")
 end
 
-local function write_report(report_path, partiture_file, results)
+local function observed_inputs(pipeline, root)
+  local inputs = {}
+  local seen = {}
+  for _, node in pairs(pipeline._graph.nodes or {}) do
+    if node.plugin == "ballad.core.source" and node.result then
+      for _, asset in ipairs(node.result.assets or {}) do
+        if asset.source_path then
+          local absolute = path.absolute(asset.source_path)
+          if absolute == root or absolute:sub(1, #root + 1) == root .. "/" then
+            local relative = path.relative(absolute, root)
+            if not seen[relative] and fs.is_file(absolute) then
+              seen[relative] = true
+              inputs[#inputs + 1] = {
+                path = relative,
+                fingerprint = "b3:" .. process.b3sum(absolute),
+              }
+            end
+          end
+        end
+      end
+    end
+  end
+  table.sort(inputs, function(a, b) return a.path < b.path end)
+  return inputs
+end
+
+local function write_report(report_path, partiture_file, results, pipeline, invocation_args)
   local root = process.capture("pwd -P")
   local sinks = {}
   for index, sink in ipairs(results) do
@@ -60,6 +86,7 @@ local function write_report(report_path, partiture_file, results)
     sinks[#sinks + 1] = {
       id = sink.node.id,
       method = sink.node.method,
+      product = sink.node.options and sink.node.options.product or nil,
       assets = assets,
     }
   end
@@ -67,9 +94,16 @@ local function write_report(report_path, partiture_file, results)
   fs.mkdir(path.dirname(report_path))
   local temporary = report_path .. ".tmp"
   fs.write_file(temporary, dkjson.encode({
-    version = 1,
+    version = 2,
     root = ".",
     partiture = partiture_file,
+    invocation = {
+      fingerprint = os.getenv("BALLAD_EXPORT_FINGERPRINT"),
+      orbit = os.getenv("BALLAD_ORBIT_NAME"),
+      args = invocation_args or {},
+      graph_fingerprint = "b3:" .. process.b3sum_string(pipeline._graph:to_json()),
+      inputs = observed_inputs(pipeline, root),
+    },
     sinks = sinks,
   }) .. "\n")
   if not process.command_ok("mv " .. process.quote(temporary) .. " " .. process.quote(report_path)) then
@@ -179,7 +213,7 @@ function cli.main(args)
     print("Executing pipeline graph...")
     local results = p:execute()
     if options.report_path then
-      write_report(options.report_path, options.partiture_file, results)
+      write_report(options.report_path, options.partiture_file, results, p, options.invocation_args)
     end
     print("Pipeline completed. " .. #results .. " explicit sink(s) produced output.")
     for i, sink in ipairs(results) do

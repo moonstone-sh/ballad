@@ -287,16 +287,32 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 
 ---@class MoonstonePlugin: PluginProxy
 ---@field project fun(opts: MoonstoneProjectOptions|nil): MoonstoneProject Read `moonstone.toml`, lockfile, and `.moonstone/env` metadata.
----@field orbit fun(opts: MoonstoneOrbitOptions): AssetNode Run an explicitly mapped child partiture through `moon orbit exec` and import its explicit materialized sinks.
+---@field orbit fun(name: string): OrbitReference Address an immediate child project without executing it.
+---@field orbit fun(opts: MoonstoneOrbitOptions): OrbitExportNode Legacy direct child-partiture invocation; prefer `orbit(name):partiture(path):run(opts)`.
 
 ---@class MoonstoneOrbitOptions
 ---@field name string Root-declared Moonstone orbit name.
 ---@field partiture string Child-relative partiture path.
 ---@field sync 'locked'|'update'|'never'|nil Child synchronization policy; defaults to `'locked'`.
----@field inputs string[] Child-relative source inputs required by cacheable exports.
+---@field inputs string[]|nil Extra child-relative source inputs for cache invalidation. Ballad also reuses the previous observed source closure.
+---@field args string[]|nil Opaque arguments passed after `ballad play <partiture> --`.
 ---@field lua_paths string[]|nil Child-relative pure-Lua module roots inside the parent project made available while loading the child partiture.
 ---@field moon string|nil Moonstone executable; defaults to `moon`.
 ---@field cacheable boolean|nil Defaults to false for `sync = 'update'`.
+
+---@class OrbitReference
+---@field name string Root-declared Moonstone orbit name.
+---@field partiture fun(path: string): OrbitPartitureReference Address a child-relative partiture without executing it.
+
+---@class OrbitPartitureReference
+---@field path string Child-relative partiture path.
+---@field run fun(opts: MoonstoneOrbitOptions|nil): OrbitExportNode Invoke the child recipe in its isolated Moonstone scope.
+
+---@class OrbitExportNode: AssetNode
+---@field product fun(name: string): OrbitProductNode Select one materialized, child-declared product. Dot and colon calls are both supported.
+
+---@class OrbitProductNode: AssetNode
+---@field orbit_product { orbit: string, name: string }
 
 ---@class MoonstoneInputOptions
 ---@field root string|nil Project root, defaults to `.`.
@@ -338,12 +354,17 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field bundle_runtime boolean|nil Bundle runtime binary (`lua`/`luajit`) into `bin/`.
 ---@field bundle_interpreter boolean|nil Alias for `bundle_runtime`.
 
+---@class LayoutDirectoryEntry
+---@field from OrbitProductNode Explicit child product selected from `moonstone.orbit`.
+---@field to string Relative destination directory inside the composed layout.
+
 ---@class LayoutLoveOptions: LoveLayoutOptions
 
 ---@class LayoutPlugin: PluginProxy
 ---@field libexec fun(project: MoonstoneProject, opts: LayoutLibexecOptions): LayoutNode Build `libexec/<name>/` plus `bin/<bin>` launcher assets.
 ---@field exec fun(project: MoonstoneProject, opts: LayoutExecOptions): LayoutNode Build a ready-to-run executable app layout backed by `libexec/<name>/`.
 ---@field flat fun(project: MoonstoneProject, opts: LayoutFlatOptions|nil): LayoutNode Build a root-relative Lua layout.
+---@field directory fun(entries: LayoutDirectoryEntry[]): LayoutNode Compose explicitly selected products beneath declared relative destinations.
 ---@field love fun(project: MoonstoneProject, opts: LayoutLoveOptions|nil): LayoutNode LÖVE layout hook; prefer `ballad.plugins.love.layout`.
 
 ---@class LoveLayoutOptions
