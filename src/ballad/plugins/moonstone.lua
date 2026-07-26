@@ -320,6 +320,19 @@ local function child_input_paths(child_root, inputs)
   return result
 end
 
+local function child_lua_paths(root, child_root, lua_paths)
+  local result = {}
+  for _, value in ipairs(lua_paths or {}) do
+    if type(value) ~= "string" or value == "" then error("moonstone.orbit: lua_paths must be child-relative directories") end
+    local resolved = canonical_dir(path.join(child_root, value))
+    if resolved ~= root and resolved:sub(1, #root + 1) ~= root .. "/" then
+      error("moonstone.orbit: lua_path escapes the parent project: " .. value)
+    end
+    result[#result + 1] = path.relative(resolved, child_root)
+  end
+  return result
+end
+
 local function import_orbit_report(ctx, orbit_name, child_root, report_path)
   local content = fs.read_file(report_path)
   if not content then error("moonstone.orbit: child did not produce report " .. report_path) end
@@ -695,6 +708,7 @@ return {
     end
 
     local report_path = path.join(child_root, ".ballad", "orbit-reports", (opts.id or orbit_name) .. ".json")
+    local lua_paths = child_lua_paths(root, child_root, opts.lua_paths)
     local moon_bin = find_moon_cli(opts)
     local command = "set -eu; "
     if sync_mode ~= "never" then
@@ -703,6 +717,10 @@ return {
     command = command
       .. process.quote(moon_bin) .. " orbit exec " .. process.quote(orbit_name)
       .. " -- ballad play " .. process.quote(partiture_file)
+    for _, lua_path in ipairs(lua_paths) do
+      command = command .. " --lua-path " .. process.quote(lua_path)
+    end
+    command = command
       .. " --report " .. process.quote(path.relative(report_path, child_root))
 
     ctx:native_task({

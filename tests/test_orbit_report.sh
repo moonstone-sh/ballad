@@ -6,10 +6,15 @@ WORK_DIR=$(mktemp -d /tmp/ballad-orbit-report.XXXXXX)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 mkdir -p "$WORK_DIR/input"
+mkdir -p "$WORK_DIR/plugins"
 printf 'hello orbit\n' > "$WORK_DIR/input/hello.txt"
+cat > "$WORK_DIR/plugins/orbit_marker.lua" <<'LUA'
+return { value = "loaded" }
+LUA
 
 cat > "$WORK_DIR/partiture.lua" <<'LUA'
 local ballad = require("ballad")
+assert(require("orbit_marker").value == "loaded")
 
 return ballad.partiture(function(p)
   local input = p.source.directory("input", { include = { "**" } })
@@ -20,7 +25,7 @@ LUA
 cd "$WORK_DIR"
 LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua --report .ballad/orbit-report.json > "$WORK_DIR/run.log" 2>&1 || {
+luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua --lua-path plugins --report .ballad/orbit-report.json > "$WORK_DIR/run.log" 2>&1 || {
   cat "$WORK_DIR/run.log"
   exit 1
 }

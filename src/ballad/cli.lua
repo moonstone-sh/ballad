@@ -17,7 +17,7 @@ local function print_help()
   print("Usage: ballad <command> [args]")
   print("")
   print("Commands:")
-  print("  play <file> [--report <path>] [-- args…]  Execute a partiture.lua pipeline script (default)")
+  print("  play <file> [--report <path>] [--lua-path <dir>] [-- args…]  Execute a partiture.lua pipeline script (default)")
   print("  init <template>   Scaffold a partiture.lua from a template")
   print("  action-run <file> Execute a serialized native action (watcher internal)")
   print("  help              Show this help message")
@@ -30,6 +30,7 @@ local function print_help()
   print("Flags:")
   print("  --jobs, -j <n>    Run native tasks with up to n jobs")
   print("  --report <path>   Write explicit sink results as a machine-readable JSON report")
+  print("  --lua-path <dir>  Prepend a pure-Lua module root before loading the partiture (repeatable)")
 end
 
 local function write_report(report_path, partiture_file, results)
@@ -83,6 +84,7 @@ function cli.parse_args(args)
     template = nil,
     jobs = 1,
     report_path = nil,
+    lua_paths = {},
     invocation_args = {},
   }
 
@@ -105,6 +107,10 @@ function cli.parse_args(args)
     elseif arg_value == "--report" then
       index = index + 1
       options.report_path = args[index] or process.fail("--report requires a path")
+    elseif arg_value == "--lua-path" then
+      index = index + 1
+      local lua_path = args[index] or process.fail("--lua-path requires a directory")
+      options.lua_paths[#options.lua_paths + 1] = lua_path
     elseif arg_value == "--help" or arg_value == "help" then
       print_help()
       os.exit(0)
@@ -137,6 +143,18 @@ function cli.parse_args(args)
   return options
 end
 
+local function apply_lua_paths(lua_paths)
+  for index = #lua_paths, 1, -1 do
+    local root = lua_paths[index]:gsub("/+$", "")
+    if root == "" then process.fail("--lua-path must not be empty") end
+    package.path = table.concat({
+      root .. "/?.lua",
+      root .. "/?/init.lua",
+      package.path,
+    }, ";")
+  end
+end
+
 local function get_cli_src_path()
   -- Use debug.getinfo to find where ballad/cli.lua is located
   local info = debug.getinfo(1, "S")
@@ -155,6 +173,7 @@ function cli.main(args)
     if not options.partiture_file then
       process.fail("Usage: ballad play <partiture.lua>")
     end
+    apply_lua_paths(options.lua_paths)
     local p = partiture.load(options.partiture_file, options.jobs, options.invocation_args)
     print("Partiture loaded: " .. options.partiture_file)
     print("Executing pipeline graph...")

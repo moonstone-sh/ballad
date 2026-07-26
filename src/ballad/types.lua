@@ -294,6 +294,7 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field partiture string Child-relative partiture path.
 ---@field sync 'locked'|'update'|'never'|nil Child synchronization policy; defaults to `'locked'`.
 ---@field inputs string[] Child-relative source inputs required by cacheable exports.
+---@field lua_paths string[]|nil Child-relative pure-Lua module roots inside the parent project made available while loading the child partiture.
 ---@field moon string|nil Moonstone executable; defaults to `moon`.
 ---@field cacheable boolean|nil Defaults to false for `sync = 'update'`.
 

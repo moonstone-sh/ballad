@@ -132,6 +132,12 @@ scope. The child partiture owns its explicit sinks; Ballad writes a temporary
 report and imports every materialized child sink into the parent graph with
 orbit provenance.
 
+When a source-tree recipe needs an additional **pure-Lua** plugin, declare its
+parent-contained root explicitly with `lua_paths` and include that source in
+the node inputs. Ballad passes those roots to the child `ballad play` process;
+it does not merge sibling tool scopes or native modules across interpreter
+boundaries.
+
 Use `sync = "locked"` for reproducible exports. It requires the child lockfile
 to be current. `sync = "update"` is for intentionally lockless examples and
 development projects; it refreshes the child environment and is non-cacheable
