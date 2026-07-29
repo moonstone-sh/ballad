@@ -1,0 +1,54 @@
+name: Ballad CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Ballad
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: moonstone-sh/moonstone
+          path: .ci/moonstone
+      - uses: actions/checkout@v4
+        with:
+          repository: moonstone-sh/ballad
+          ref: main
+          path: .ci/ballad-ci
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Install release tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y b3sum
+      - name: Build Moonstone CLI
+        working-directory: .ci/moonstone
+        run: |
+          zig build
+          echo "$GITHUB_WORKSPACE/.ci/moonstone/zig-out/bin" >> "$GITHUB_PATH"
+      - name: Synchronize Ballad
+        run: moon sync
+      - name: Validate Ballad and export itself
+        run: |
+          moon exec sh -c '
+            set -eu
+            ./tests/test_layout_exec.sh
+            ./tests/test_native_closure.sh
+            BALLAD_ROOT="$GITHUB_WORKSPACE" .ci/ballad-ci/tests/test_stage2.sh
+            ./tests/test_watcher.sh
+            ./tests/test_native_action.sh
+            ./tests/test_invocation_args.sh
+            ./tests/test_orbit_report.sh
+            ./tests/test_orbit_integration.sh
+            ./tests/test_publish_verification.sh
+          '
+          moon run play

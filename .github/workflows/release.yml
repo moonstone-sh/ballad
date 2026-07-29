@@ -1,14 +1,12 @@
-name: Ballad CI
+name: Publish Ballad
 
 on:
-  pull_request:
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing v* tag to validate and publish.
+        description: Existing v* tag to publish after a publish-only failure.
         required: true
         type: string
 
@@ -16,60 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    name: Validate Ballad
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
-      - uses: actions/checkout@v4
-        with:
-          repository: moonstone-sh/moonstone
-          path: .ci/moonstone
-      - uses: actions/checkout@v4
-        with:
-          repository: moonstone-sh/ballad
-          ref: main
-          path: .ci/ballad-ci
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-      - name: Install release tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y b3sum
-      - name: Build Moonstone CLI
-        working-directory: .ci/moonstone
-        run: |
-          zig build
-          echo "$GITHUB_WORKSPACE/.ci/moonstone/zig-out/bin" >> "$GITHUB_PATH"
-      - name: Synchronize Ballad
-        run: moon sync
-      - name: Validate Ballad and export itself
-        run: |
-          moon exec sh -c '
-            set -eu
-            ./tests/test_layout_exec.sh
-            ./tests/test_native_closure.sh
-            if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-              BALLAD_ROOT="$GITHUB_WORKSPACE" .ci/ballad-ci/tests/test_stage2.sh
-            else
-              ./tests/test_stage2.sh
-            fi
-            ./tests/test_watcher.sh
-            ./tests/test_native_action.sh
-            ./tests/test_invocation_args.sh
-            ./tests/test_orbit_report.sh
-            ./tests/test_orbit_integration.sh
-            ./tests/test_publish_verification.sh
-          '
-          moon run play
-
   publish:
     name: Publish Ballad registry artifact
-    needs: validate
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -110,7 +56,7 @@ jobs:
           asset="$(find dist/ballad/registry-artifact -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
           test -n "$asset"
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --title "Ballad $RELEASE_TAG" --generate-notes
-          gh release upload "$RELEASE_TAG" "$asset" --clobber
+          gh release upload "$RELEASE_TAG" "$asset"
           echo "MOONSTONE_ARTIFACT_URL=https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/$(basename "$asset")" >> "$GITHUB_ENV"
       - name: Publish registry artifact
         env:

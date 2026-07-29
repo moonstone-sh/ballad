@@ -34,9 +34,8 @@ version = "5.4"
 abi = "5.4"
 
 [[dependencies]]
-name = "$BALLAD_ROOT"
-constraint = "*"
-resolver = "path"
+name = "moonstone/ballad"
+constraint = "path:$BALLAD_ROOT"
 role = "tool"
 TOML
 
