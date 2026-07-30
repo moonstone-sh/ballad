@@ -421,8 +421,8 @@ if ! grep -q "role = \"peer\"" dist/nvim-deps-artifact/package.toml; then
   cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi
-if ! grep -q "resolver = \"moonstone\"" dist/nvim-deps-artifact/package.toml; then
-	echo "FAIL: plenary resolver not in package.toml"
+if ! grep -q "registry = \"moonstone\"" dist/nvim-deps-artifact/package.toml; then
+	echo "FAIL: plenary registry not in package.toml"
   cat dist/nvim-deps-artifact/package.toml
   exit 1
 fi

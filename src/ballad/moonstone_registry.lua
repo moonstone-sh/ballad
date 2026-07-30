@@ -456,16 +456,16 @@ registry.package = function(ctx, inputs, opts)
 		for role, dep_list in pairs(meta.dependencies) do
 			for dep_name, spec in pairs(dep_list) do
 				local constraint = spec.constraint or "*"
-				local resolver = spec.resolver
+				local registry = spec.registry or spec.resolver
 				local prefix, remainder = constraint:match("^([^:]+):(.+)$")
 				if prefix then
-					resolver = resolver or prefix
+					registry = registry or prefix
 					constraint = remainder:match("@(.+)$") or "*"
 				end
-				resolver = resolver or "moonstone"
+				registry = registry or "moonstone"
 				dependency_entries[#dependency_entries + 1] = {
 					role = role,
-					resolver = resolver,
+					registry = registry,
 					name = spec.package or dep_name,
 					constraint = constraint,
 				}
@@ -473,8 +473,8 @@ registry.package = function(ctx, inputs, opts)
 		end
 	end
 	table.sort(dependency_entries, function(left, right)
-		return table.concat({ left.role, left.resolver, left.name, left.constraint }, "\0")
-			< table.concat({ right.role, right.resolver, right.name, right.constraint }, "\0")
+		return table.concat({ left.role, left.registry, left.name, left.constraint }, "\0")
+			< table.concat({ right.role, right.registry, right.name, right.constraint }, "\0")
 	end)
 	local dependency_sections = {}
 	for _, dependency in ipairs(dependency_entries) do
@@ -482,7 +482,7 @@ registry.package = function(ctx, inputs, opts)
 			"[[dependencies]]",
 			"name = " .. toml_quote(dependency.name),
 			"constraint = " .. toml_quote(dependency.constraint),
-			"resolver = " .. toml_quote(dependency.resolver),
+			"registry = " .. toml_quote(dependency.registry),
 			"role = " .. toml_quote(dependency.role),
 		}, "\n")
 	end
