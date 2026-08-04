@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: moonstone-sh/moonstone
-          ref: v0.3.50
+          ref: main
           path: .ci/moonstone
       - uses: actions/checkout@v4
         with:
@@ -48,6 +48,7 @@ jobs:
             ./tests/test_watcher.sh
             ./tests/test_native_action.sh
             ./tests/test_invocation_args.sh
+            ./tests/test_moonstone_contract.sh
             ./tests/test_orbit_report.sh
             ./tests/test_orbit_integration.sh
             ./tests/test_publish_verification.sh

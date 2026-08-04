@@ -7,6 +7,8 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 mkdir -p "$WORK_DIR/generated/app" "$WORK_DIR/unused" "$WORK_DIR/.moonstone/env/share/lua/5.1/helper" "$WORK_DIR/.moonstone/env/lib/lua/5.1"
 cat > "$WORK_DIR/moonstone.toml" <<'TOML'
+manifest_version = 2
+
 [package]
 name = "user/meteorite"
 version = "1.2.3"
