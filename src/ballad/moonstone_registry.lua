@@ -40,7 +40,7 @@ local graph = require("ballad.graph")
 local fs = require("ballad.fs")
 local path = require("ballad.path")
 local process = require("ballad.process")
-local toml = require("ballad.toml")
+local project_mod = require("ballad.project")
 
 registry.name = "ballad.moonstone_registry"
 registry.version = "0.1.0"
@@ -141,15 +141,12 @@ end
 
 local function resolve_origin(inputs, opts)
 	local project_asset = project_asset_from_inputs(inputs)
-	local project_root = project_asset and project_asset.metadata and project_asset.metadata.root or (opts and opts.root) or "."
-	local origin = (opts and opts.origin) or (project_asset and project_asset.metadata and project_asset.metadata.origin)
-	if not origin then
-		local manifest = fs.read_file(path.join(project_root, "moonstone.toml"))
-		if manifest then
-			local ok, parsed = pcall(toml.parse, manifest)
-			if ok and type(parsed.origin) == "table" then origin = parsed.origin end
-		end
-	end
+  local project_root = project_asset and project_asset.metadata and project_asset.metadata.root or (opts and opts.root) or "."
+  local origin = (opts and opts.origin) or (project_asset and project_asset.metadata and project_asset.metadata.origin)
+  if not origin and fs.read_file(path.join(project_root, "moonstone.toml")) then
+    local ok, loaded = pcall(project_mod.load_manifest, project_root, opts or {})
+    if ok and loaded and loaded.manifest then origin = loaded.manifest.origin end
+  end
 	if type(origin) ~= "table" or type(origin.kind) ~= "string" or type(origin.url) ~= "string" then return nil end
 
 	local resolved = { kind = origin.kind, url = origin.url }

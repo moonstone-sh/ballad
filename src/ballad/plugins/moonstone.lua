@@ -282,23 +282,16 @@ local function canonical_dir(value)
   return resolved
 end
 
-local function resolve_orbit(root, name)
-  local manifest = fs.read_file(path.join(root, "moonstone.toml"))
-  if not manifest then error("moonstone.orbit: missing root moonstone.toml in " .. root) end
-
+local function resolve_orbit(root, name, moon_bin)
+  local loaded = project_mod.load_manifest(root, { moon = moon_bin })
   local current = nil
-  for raw_line in manifest:gmatch("[^\r\n]+") do
-    local line = raw_line:match("^%s*(.-)%s*$")
-    if line == "[[orbits.member]]" then
-      if current and current.name == name and current.path then break end
-      current = {}
-    elseif current then
-      local key, value = line:match('^([%w_]+)%s*=%s*"(.-)"%s*$')
-      if key then current[key] = value end
+  for _, orbit in ipairs(loaded.manifest.orbits or {}) do
+    if orbit.name == name then
+      current = orbit
+      break
     end
   end
-
-  if not current or current.name ~= name or not current.path then
+  if not current or not current.path then
     error("moonstone.orbit: unknown root-declared orbit '" .. name .. "'")
   end
 
@@ -518,7 +511,7 @@ return {
   ---@return table
   project_prepare = function(opts)
     local root = opts.root or "."
-    local loaded = project_mod.load(root)
+    local loaded = project_mod.load(root, opts)
     local pkg = loaded.manifest and loaded.manifest.package or {}
     local rt = loaded.manifest and loaded.manifest.runtime or {}
     local env_rt = loaded.env and loaded.env.runtime or {}
@@ -582,52 +575,20 @@ return {
   ---@return AssetSet
   project = function(ctx, inputs, opts)
     local root = opts.root or "."
-    local loaded = project_mod.load(root)
+    local loaded = project_mod.load(root, opts)
     local pkg = loaded.manifest and loaded.manifest.package or {}
 
     -- Build role-grouped dependency map from flat, role-table, or [[dependencies]] array manifest.dependencies
     local dep_roles = { dev = {}, tool = {}, runtime = {}, helper = {}, peer = {}, optional = {} }
-    local manifest_content = fs.read_file(path.join(loaded.root, "moonstone.toml")) or ""
-    local parsed_deps = parse_dependencies_toml(manifest_content)
-    if #parsed_deps > 0 then
-      for _, dep in ipairs(parsed_deps) do
+    if loaded.manifest and loaded.manifest.dependencies then
+      for _, dep in ipairs(loaded.manifest.dependencies) do
         local role = dep.role or "runtime"
         if dep_roles[role] then
           dep_roles[role][dep.name] = {
             constraint = dep.constraint or "*",
-            resolver = dep.resolver or nil,
-            optional = (role == "optional") or (dep.optional == "true"),
+            resolver = dep.registry or nil,
+            optional = (role == "optional") or dep.optional or false,
           }
-        end
-      end
-    elseif loaded.manifest and loaded.manifest.dependencies then
-      if #loaded.manifest.dependencies > 0 then
-        for _, dep in ipairs(loaded.manifest.dependencies) do
-          local role = dep.role or "runtime"
-          if dep_roles[role] then
-            dep_roles[role][dep.name] = {
-              constraint = dep.constraint or "*",
-              resolver = dep.resolver or nil,
-              optional = dep.optional or false,
-            }
-          end
-        end
-      else
-        for role, deps in pairs(loaded.manifest.dependencies) do
-          local normalized_role = role
-          if role == "libs" then normalized_role = "runtime" end
-          if role == "bins" then normalized_role = "helper" end
-          if role == "dev_libs" then normalized_role = "dev" end
-          if role == "dev_bins" then normalized_role = "tool" end
-          if dep_roles[normalized_role] and type(deps) == "table" then
-            for dep_name, spec in pairs(deps) do
-              dep_roles[normalized_role][dep_name] = {
-                constraint = tostring(spec),
-                resolver = tostring(spec):match("^([^:]+):") or nil,
-                optional = normalized_role == "optional",
-              }
-            end
-          end
         end
       end
     end
@@ -770,7 +731,8 @@ return {
       error("moonstone.orbit: sync must be 'locked', 'update', or 'never'")
     end
     local root = canonical_dir(opts.root or ".")
-    local child_root = resolve_orbit(root, orbit_name)
+    local moon_bin = find_moon_cli(opts)
+    local child_root = resolve_orbit(root, orbit_name, moon_bin)
     local child_partiture = path.join(child_root, partiture_file)
     if not fs.read_file(child_partiture) then
       error("moonstone.orbit: partiture not found in orbit '" .. orbit_name .. "': " .. partiture_file)
@@ -780,7 +742,6 @@ return {
     local args = opts.args or {}
     local invocation = invocation_fingerprint(orbit_name, child_root, partiture_file, args, lua_paths)
     local report_path = path.join(child_root, ".ballad", "exports", invocation .. ".json")
-    local moon_bin = find_moon_cli(opts)
     local command = "set -eu; "
     if sync_mode ~= "never" then
       command = command .. process.quote(moon_bin) .. " orbit sync " .. process.quote(orbit_name) .. " --" .. sync_mode .. "; "

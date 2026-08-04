@@ -106,7 +106,7 @@ end
 ---@return table
 function input.packages_prepare(opts)
   opts = opts or {}
-  local loaded = project_mod.load(opts.root or ".")
+  local loaded = project_mod.load(opts.root or ".", opts)
   return {
     root = loaded.root,
     packages = input.enrich_packages(loaded.packages, opts),
@@ -119,7 +119,7 @@ end
 ---@return AssetSet
 function input.packages(ctx, inputs, opts)
   opts = opts or {}
-  local loaded = project_mod.load(opts.root or ".")
+  local loaded = project_mod.load(opts.root or ".", opts)
   local packages = input.enrich_packages(loaded.packages, opts)
   local assets = graph.AssetSet.new()
   local asset = ctx.graph:add_asset({
