@@ -1,5 +1,6 @@
 local process = require("ballad.process")
 local partiture = require("ballad.partiture")
+local moonstone_contract = require("ballad.moonstone_contract")
 local fs = require("ballad.fs")
 local path = require("ballad.path")
 local dkjson = require("dkjson")
@@ -31,6 +32,7 @@ local function print_help()
   print("  --jobs, -j <n>    Run native tasks with up to n jobs")
   print("  --report <path>   Write explicit sink results as a machine-readable JSON report")
   print("  --lua-path <dir>  Prepend a pure-Lua module root before loading the partiture (repeatable)")
+  print("  --moonstone-entrypoint  Add a missing build entrypoint through Moonstone's manifest API (init only)")
 end
 
 local function observed_inputs(pipeline, root)
@@ -120,6 +122,7 @@ function cli.parse_args(args)
     report_path = nil,
     lua_paths = {},
     invocation_args = {},
+    moonstone_entrypoint = false,
   }
 
   local positionals = {}
@@ -145,6 +148,8 @@ function cli.parse_args(args)
       index = index + 1
       local lua_path = args[index] or process.fail("--lua-path requires a directory")
       options.lua_paths[#options.lua_paths + 1] = lua_path
+    elseif arg_value == "--moonstone-entrypoint" then
+      options.moonstone_entrypoint = true
     elseif arg_value == "--help" or arg_value == "help" then
       print_help()
       os.exit(0)
@@ -247,6 +252,15 @@ function cli.main(args)
     end
     fout:write(content)
     fout:close()
+    if options.moonstone_entrypoint then
+      local root = process.capture("pwd -P")
+      local changed = moonstone_contract.add_script_if_missing(root, os.getenv("MOONSTONE_BIN") or "moon", "build", "ballad play partiture.lua")
+      if changed then
+        print("Added Moonstone build entrypoint through the manifest contract.")
+      else
+        print("Left existing Moonstone script `build` unchanged.")
+      end
+    end
     print("Successfully initialized partiture.lua from template: " .. options.template)
   elseif options.command == "action-run" then
     if not options.action_file then process.fail("Usage: ballad action-run <action.json>") end
