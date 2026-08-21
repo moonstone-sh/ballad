@@ -33,7 +33,7 @@ JSON
     ;;
   lock:export:--json)
     cat <<'JSON'
-{"contract":"moonstone:lock:v1","storage_revision":"b3:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210","lockfile_version":2,"packages":[{"name":"moonstone/meteorite","version":"0.1.41","kind":"tool","resolver":"moonstone","registry":"moonstone","artifact_hash":"b3:artifact","source_hash":"b3:source","recipe_hash":"b3:recipe","runtime":"lua@5.4","lua_abi":"5.4","target":"native","replay_mode":"portable_source","reproducible":true}],"profiles":[]}
+{"contract":"moonstone:lock:v1","storage_revision":"b3:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210","lockfile_version":3,"realizations":[{"realization_hash":"b3:realization","name":"moonstone/meteorite","version":"0.1.41","kind":"tool","resolver":"moonstone","registry":"moonstone","artifact_hash":"b3:artifact","source_hash":"b3:source","recipe_hash":"b3:recipe","runtime":"lua@5.4","lua_abi":"5.4","target":"aarch64-macos","replay_mode":"portable_source","reproducible":true}],"profiles":[]}
 JSON
     ;;
   *)

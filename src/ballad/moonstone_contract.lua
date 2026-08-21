@@ -82,9 +82,17 @@ function contract.lock_export(root, moon_bin)
   if not fs.read_file(lock_path) then return nil end
 
   local document = capture_json(root, moon_bin, "lock export --json", true)
-  if document.contract ~= "moonstone:lock:v1" or type(document.packages) ~= "table" then
+  if document.contract ~= "moonstone:lock:v1" then
     error("moonstone contract query returned an unsupported lock document")
   end
+
+  if type(document.packages) ~= "table" then
+    if type(document.realizations) ~= "table" then
+      error("moonstone contract query returned an unsupported lock document")
+    end
+    document.packages = document.realizations
+  end
+
   return document
 end
 

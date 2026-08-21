@@ -10,13 +10,15 @@ description = "Deterministic Lua project exporter and bundler for Moonstone"
 kind = "git"
 url = "https://github.com/moonstone-sh/ballad"
 
-[runtime]
-name = "moonstone/luajit"
+[interpreter]
+name = "luajit"
 version = "2.1.0"
 abi = "5.1"
 
-[dependencies.runtime]
-"dkjson" = "rocks:dkjson@^2.9-1"
+[[dependencies]]
+name = "dkjson"
+constraint = "rocks:dkjson@^2.9-1"
+role = "runtime"
 
 [scripts]
 play = 'lua src/main.lua play partiture.lua "$@"'

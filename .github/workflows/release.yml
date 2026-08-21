@@ -26,7 +26,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: moonstone-sh/moonstone
-          ref: main
+          # Pinned to the current manifest, lockfile, and projected-environment contract.
+          ref: ad1ef8c03f8d6c32711dc35c9fd4aa1661cc4f07
           path: .ci/moonstone
       - uses: mlugg/setup-zig@v2
         with:
@@ -42,7 +43,7 @@ jobs:
           echo "$GITHUB_WORKSPACE/.ci/moonstone/zig-out/bin" >> "$GITHUB_PATH"
       - name: Synchronize and export tagged Ballad
         run: |
-          moon sync
+          moon sync --locked
           moon run play
       - name: Verify tag version
         env:

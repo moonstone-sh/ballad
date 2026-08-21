@@ -1,22 +1,48 @@
-lockfile_version = 2
+lockfile_version = 3
 
-[[package]]
+[[realization]]
+realization_hash = "b3:321a9ad59d2f86fdea6c65759fdada58c62b0ccf0b4fd46a0c598c134d5a5e3a"
+name = "moonstone/luajit"
+version = "2.1.0"
+kind = "runtime"
+source_hash = "b3:f4d32a967447c8d87a709c01fa5229748de4054e51dfa073e0ad1e61c2683bbf"
+recipe_hash = "b3:87ce0ab3289a4de41594c7c8680a7ad440c612089cef0a503e1b440837005519"
+artifact_hash = "b3:f4d32a967447c8d87a709c01fa5229748de4054e51dfa073e0ad1e61c2683bbf"
+replay_mode = "artifact_only"
+runtime = "moonstone/luajit"
+lua_abi = "5.1"
+target = "aarch64-macos"
+constellation = "default"
+source_kind = "runtime"
+resolver = "moonstone"
+
+[[realization]]
+realization_hash = "b3:bfbd0e9eb15aa1e9cf4dbe736fa974dc98bded60e2b432988e38ee51e444712a"
 name = "dkjson"
-version = "2.10-1"
+version = "2.11-1"
 kind = "lib"
-source_hash = "b3:07523c903f6f1acf2c4673574d96e7ea0c3a82f579f3fff5da286b7f15e5ac7e"
-recipe_hash = "b3:80842179d498cf2e74769062984c55f622150a7c501996769873e763d8919640"
-artifact_hash = "b3:785ea7cd786e8b6a09637ff5e17511a0c5c7f130a7de0d197486579db40e4ac1"
+source_hash = "b3:736026c095d0d92f41d668c8bab1c02f58902d677326cbeca0fb592092b214a3"
+recipe_hash = "b3:25062268f0435d9199e4f33c2a4c7c3890c5eb1205496c228c5b08e4332e0c67"
+artifact_hash = "b3:feb66e31f1f5665b714ef3b9a67b387ea3e5560c7da91e01bf5c71e12fc93333"
 replay_mode = "portable_source"
 runtime = "5.1"
 lua_abi = "5.1"
-target = "native"
+target = "aarch64-macos"
 constellation = "default"
-source = "https://luarocks.org/dkjson-2.10-1.src.rock"
+source = "https://luarocks.org/dkjson-2.11-1.src.rock"
 source_kind = "luarocks_src_rock"
-source_payload = "sources/dkjson-2.10-1.src.rock"
-rockspec = "https://luarocks.org/dkjson-2.10-1.rockspec"
-rockspec_hash = "b3:b9141c71156f9952819c18309c0be33dfcac49bb9d3d8ee60968ad4d7fefab28"
-rockspec_payload = "sources/dkjson-2.10-1.rockspec"
+source_payload = "sources/dkjson-2.11-1.src.rock"
+rockspec = "https://luarocks.org/dkjson-2.11-1.rockspec"
+rockspec_hash = "b3:f435b6b2f3924979d1a69598935ee7de27f35dbaa5dfa6b36aeda2f5f7356c44"
+rockspec_payload = "sources/dkjson-2.11-1.rockspec"
 resolver = "rocks"
+registry = "rocks"
 roles = ["runtime"]
+
+[[profile]]
+id = "aarch64-macos+moonstone/luajit+5.1"
+target = "aarch64-macos"
+runtime = "moonstone/luajit"
+lua_abi = "5.1"
+packages = [{ name = "moonstone/luajit", version = "2.1.0", realization_hash = "b3:321a9ad59d2f86fdea6c65759fdada58c62b0ccf0b4fd46a0c598c134d5a5e3a" }, { name = "dkjson", version = "2.11-1", realization_hash = "b3:bfbd0e9eb15aa1e9cf4dbe736fa974dc98bded60e2b432988e38ee51e444712a" }]
+edges = []
