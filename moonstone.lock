@@ -39,10 +39,57 @@ resolver = "rocks"
 registry = "rocks"
 roles = ["runtime"]
 
+[[realization]]
+realization_hash = "b3:50c65ecd0b0cf941d1269a5b9085e2c8821ee46a292e5735d6a9a2fefc0829a9"
+name = "moonstone/luajit"
+version = "2.1.0"
+kind = "runtime"
+source_hash = "b3:944315c9c5dae5dbefa301abac275b0d39fd2c11eaa286eba2c7f014df7628cb"
+recipe_hash = "b3:dd95077686069b6cb166b9c2444156a7b360317b4bcf97a69573424162dabc8a"
+artifact_hash = "b3:944315c9c5dae5dbefa301abac275b0d39fd2c11eaa286eba2c7f014df7628cb"
+replay_mode = "artifact_only"
+runtime = "moonstone/luajit"
+lua_abi = "5.1"
+target = "x86_64-linux-gnu"
+constellation = "default"
+source_kind = "runtime"
+resolver = "moonstone"
+
+[[realization]]
+realization_hash = "b3:a4f67ae157c1aa043d67af95eff111e732164f0947d4d72c48d5537ac9140096"
+name = "dkjson"
+version = "2.11-1"
+kind = "lib"
+source_hash = "b3:736026c095d0d92f41d668c8bab1c02f58902d677326cbeca0fb592092b214a3"
+recipe_hash = "b3:25062268f0435d9199e4f33c2a4c7c3890c5eb1205496c228c5b08e4332e0c67"
+artifact_hash = "b3:feb66e31f1f5665b714ef3b9a67b387ea3e5560c7da91e01bf5c71e12fc93333"
+replay_mode = "portable_source"
+runtime = "5.1"
+lua_abi = "5.1"
+target = "x86_64-linux-gnu"
+constellation = "default"
+source = "https://luarocks.org/dkjson-2.11-1.src.rock"
+source_kind = "luarocks_src_rock"
+source_payload = "sources/dkjson-2.11-1.src.rock"
+rockspec = "https://luarocks.org/dkjson-2.11-1.rockspec"
+rockspec_hash = "b3:f435b6b2f3924979d1a69598935ee7de27f35dbaa5dfa6b36aeda2f5f7356c44"
+rockspec_payload = "sources/dkjson-2.11-1.rockspec"
+resolver = "rocks"
+registry = "rocks"
+roles = ["runtime"]
+
 [[profile]]
 id = "aarch64-macos+moonstone/luajit+5.1"
 target = "aarch64-macos"
 runtime = "moonstone/luajit"
 lua_abi = "5.1"
 packages = [{ name = "moonstone/luajit", version = "2.1.0", realization_hash = "b3:321a9ad59d2f86fdea6c65759fdada58c62b0ccf0b4fd46a0c598c134d5a5e3a" }, { name = "dkjson", version = "2.11-1", realization_hash = "b3:bfbd0e9eb15aa1e9cf4dbe736fa974dc98bded60e2b432988e38ee51e444712a" }]
+edges = []
+
+[[profile]]
+id = "x86_64-linux-gnu+moonstone/luajit+5.1"
+target = "x86_64-linux-gnu"
+runtime = "moonstone/luajit"
+lua_abi = "5.1"
+packages = [{ name = "moonstone/luajit", version = "2.1.0", realization_hash = "b3:50c65ecd0b0cf941d1269a5b9085e2c8821ee46a292e5735d6a9a2fefc0829a9" }, { name = "dkjson", version = "2.11-1", realization_hash = "b3:a4f67ae157c1aa043d67af95eff111e732164f0947d4d72c48d5537ac9140096" }]
 edges = []
