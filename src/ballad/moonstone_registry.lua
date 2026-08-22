@@ -479,7 +479,7 @@ registry.package = function(ctx, inputs, opts)
 			"[[dependencies]]",
 			"name = " .. toml_quote(dependency.name),
 			"constraint = " .. toml_quote(dependency.constraint),
-			"registry = " .. toml_quote(dependency.registry),
+			"resolver = " .. toml_quote(dependency.registry),
 			"role = " .. toml_quote(dependency.role),
 		}, "\n")
 	end
