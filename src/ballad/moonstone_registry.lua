@@ -447,25 +447,39 @@ registry.package = function(ctx, inputs, opts)
 		}, "\n")
 	end
 
-	-- Build dependency metadata from layout
+	-- Build dependency metadata from layout or explicit opts.dependencies
 	local dependency_entries = {}
-	if meta.dependencies then
-		for role, dep_list in pairs(meta.dependencies) do
-			for dep_name, spec in pairs(dep_list) do
-				local constraint = spec.constraint or "*"
-				local registry = spec.registry or spec.resolver
-				local prefix, remainder = constraint:match("^([^:]+):(.+)$")
-				if prefix then
-					registry = registry or prefix
-					constraint = remainder:match("@(.+)$") or "*"
-				end
-				registry = registry or "moonstone"
+	local raw_deps = opts.dependencies or (meta and meta.dependencies)
+	if raw_deps then
+		if raw_deps[1] and type(raw_deps[1]) == "table" then
+			for _, dep in ipairs(raw_deps) do
 				dependency_entries[#dependency_entries + 1] = {
-					role = role,
-					registry = registry,
-					name = spec.package or dep_name,
-					constraint = constraint,
+					role = dep.role or "runtime",
+					registry = dep.resolver or dep.registry or "moonstone",
+					name = dep.name,
+					constraint = dep.constraint or "*",
 				}
+			end
+		else
+			for role, dep_list in pairs(raw_deps) do
+				if type(dep_list) == "table" then
+					for dep_name, spec in pairs(dep_list) do
+						local constraint = type(spec) == "table" and (spec.constraint or "*") or tostring(spec)
+						local registry = type(spec) == "table" and (spec.registry or spec.resolver) or nil
+						local prefix, remainder = constraint:match("^([^:]+):(.+)$")
+						if prefix then
+							registry = registry or prefix
+							constraint = remainder:match("@(.+)$") or "*"
+						end
+						registry = registry or "moonstone"
+						dependency_entries[#dependency_entries + 1] = {
+							role = role,
+							registry = registry,
+							name = type(spec) == "table" and (spec.package or dep_name) or dep_name,
+							constraint = constraint,
+						}
+					end
+				end
 			end
 		end
 	end

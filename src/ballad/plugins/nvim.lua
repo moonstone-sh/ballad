@@ -270,7 +270,7 @@ local nvim_plugin = {
         for dep_name, dep_spec in pairs(deps_table) do
           local spec = {
             role = role,
-            package = dep_spec.package or dep_name,
+            package = dep_name,
             constraint = dep_spec.constraint or "*",
             optional = (role == "optional") or dep_spec.optional or false,
           }

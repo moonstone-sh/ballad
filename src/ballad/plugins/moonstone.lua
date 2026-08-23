@@ -528,7 +528,7 @@ return {
     local lua_abi = rt.abi or env_rt.abi or "5.1"
     local runtime_record = hydrate_runtime(loaded, opts)
     local packages = moonstone_input.enrich_packages(loaded.packages, {
-      roles = opts.roles or { "runtime" },
+      roles = opts.roles or { "runtime", "peer", "optional", "tool", "dev", "helper" },
       moon = opts.moon or opts.moon_bin or "moon",
     })
     -- An explicit package README wins. Otherwise prefer a registry-facing
@@ -579,16 +579,34 @@ return {
     local pkg = loaded.manifest and loaded.manifest.package or {}
 
     -- Build role-grouped dependency map from flat, role-table, or [[dependencies]] array manifest.dependencies
-    local dep_roles = { dev = {}, tool = {}, runtime = {}, helper = {}, peer = {}, optional = {} }
+    local dep_roles = { dev = {}, tool = {}, runtime = {}, helper = {}, peer = {}, optional = {}, external = {} }
     if loaded.manifest and loaded.manifest.dependencies then
-      for _, dep in ipairs(loaded.manifest.dependencies) do
-        local role = dep.role or "runtime"
-        if dep_roles[role] then
-          dep_roles[role][dep.name] = {
-            constraint = dep.constraint or "*",
-            resolver = dep.registry or nil,
-            optional = (role == "optional") or dep.optional or false,
-          }
+      local raw_deps = loaded.manifest.dependencies
+      if raw_deps[1] and type(raw_deps[1]) == "table" then
+        for _, dep in ipairs(raw_deps) do
+          local role = dep.role or "runtime"
+          if role == "external" then role = "peer" end
+          if dep_roles[role] then
+            dep_roles[role][dep.name] = {
+              constraint = dep.constraint or "*",
+              resolver = dep.registry or nil,
+              optional = (role == "optional") or dep.optional or false,
+            }
+          end
+        end
+      else
+        for dep_name, dep in pairs(raw_deps) do
+          if type(dep) == "table" then
+            local role = dep.role or "runtime"
+            if role == "external" then role = "peer" end
+            if dep_roles[role] then
+              dep_roles[role][dep_name] = {
+                constraint = dep.constraint or "*",
+                resolver = dep.registry or dep.resolver or nil,
+                optional = (role == "optional") or dep.optional or false,
+              }
+            end
+          end
         end
       end
     end
