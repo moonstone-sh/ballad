@@ -365,7 +365,7 @@ registry.package = function(ctx, inputs, opts)
 				elseif asset.output_path then
 					fs.copy_file(asset.output_path, dest)
 				end
-				if asset.metadata and asset.metadata.executable then
+				if asset.executable or (asset.metadata and asset.metadata.executable) then
 					fs.chmod(dest, "+x")
 				end
 			end
