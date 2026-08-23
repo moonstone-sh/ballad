@@ -154,9 +154,17 @@ function cli.parse_args(args)
       print_help()
       os.exit(0)
     elseif arg_value:sub(1, 1) == "-" then
-      process.fail("unknown flag: " .. arg_value)
+      options.invocation_args[#options.invocation_args + 1] = arg_value
     else
-      positionals[#positionals + 1] = arg_value
+      if #positionals == 0 then
+        positionals[#positionals + 1] = arg_value
+      elseif positionals[1] == "play" and #positionals == 1 then
+        positionals[#positionals + 1] = arg_value
+      elseif KNOWN_COMMANDS[positionals[1]] and #positionals == 1 then
+        positionals[#positionals + 1] = arg_value
+      else
+        options.invocation_args[#options.invocation_args + 1] = arg_value
+      end
     end
 
     index = index + 1
