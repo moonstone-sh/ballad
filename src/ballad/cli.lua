@@ -5,6 +5,10 @@ local fs = require("ballad.fs")
 local path = require("ballad.path")
 local dkjson = require("dkjson")
 
+local TEMPLATE_NAMES = { "executable", "love2d", "registry" }
+local TEMPLATE_SET = {}
+for _, name in ipairs(TEMPLATE_NAMES) do TEMPLATE_SET[name] = true end
+
 local cli = {}
 
 local KNOWN_COMMANDS = {
@@ -19,7 +23,7 @@ local function print_help()
   print("")
   print("Commands:")
   print("  play <file> [--report <path>] [--lua-path <dir>] [-- args…]  Execute a partiture.lua pipeline script (default)")
-  print("  init <template>   Scaffold a partiture.lua from a template")
+  print("  init --template <name>  Scaffold a conventional partiture and Moonstone package script")
   print("  action-run <file> Execute a serialized native action (watcher internal)")
   print("  help              Show this help message")
   print("")
@@ -32,7 +36,10 @@ local function print_help()
   print("  --jobs, -j <n>    Run native tasks with up to n jobs")
   print("  --report <path>   Write explicit sink results as a machine-readable JSON report")
   print("  --lua-path <dir>  Prepend a pure-Lua module root before loading the partiture (repeatable)")
-  print("  --moonstone-entrypoint  Add a missing build entrypoint through Moonstone's manifest API (init only)")
+  print("  --script-name <name>    Moonstone script created by init (default: package)")
+  print("  --script-command <cmd>  Override the conventional Ballad script command")
+  print("  --no-script             Do not register a Moonstone script during init")
+  print("  --force-script          Replace a conflicting Moonstone script during init")
 end
 
 local function observed_inputs(pipeline, root)
@@ -106,6 +113,7 @@ local function write_report(report_path, partiture_file, results, pipeline, invo
       graph_fingerprint = "b3:" .. process.b3sum_string(pipeline._graph:to_json()),
       inputs = observed_inputs(pipeline, root),
     },
+    controls = pipeline._graph.metadata.controls or {},
     sinks = sinks,
   }) .. "\n")
   if not process.command_ok("mv " .. process.quote(temporary) .. " " .. process.quote(report_path)) then
@@ -122,7 +130,10 @@ function cli.parse_args(args)
     report_path = nil,
     lua_paths = {},
     invocation_args = {},
-    moonstone_entrypoint = false,
+    register_script = true,
+    force_script = false,
+    script_name = "package",
+    script_command = "moon exec ballad -- play partiture.lua",
   }
 
   local positionals = {}
@@ -131,7 +142,10 @@ function cli.parse_args(args)
   while index <= #args do
     local arg_value = args[index]
 
-    if arg_value == "--" then
+    if arg_value == "--" and index == 1 then
+      -- Accept the transport delimiter when a launcher forwards it instead of
+      -- consuming it (for example: `moon exec ballad -- init ...`).
+    elseif arg_value == "--" then
       index = index + 1
       while index <= #args do
         options.invocation_args[#options.invocation_args + 1] = args[index]
@@ -148,8 +162,25 @@ function cli.parse_args(args)
       index = index + 1
       local lua_path = args[index] or process.fail("--lua-path requires a directory")
       options.lua_paths[#options.lua_paths + 1] = lua_path
+    elseif arg_value == "--template" then
+      index = index + 1
+      options.template = args[index] or process.fail("--template requires a name")
+    elseif arg_value == "--script-name" then
+      index = index + 1
+      options.script_name = args[index] or process.fail("--script-name requires a name")
+    elseif arg_value == "--script-command" then
+      index = index + 1
+      options.script_command = args[index] or process.fail("--script-command requires a command")
+    elseif arg_value == "--no-script" then
+      options.register_script = false
+    elseif arg_value == "--force-script" then
+      options.force_script = true
     elseif arg_value == "--moonstone-entrypoint" then
-      options.moonstone_entrypoint = true
+      -- Preserve the experimental init contract while the conventional
+      -- `package` entrypoint becomes the default for new invocations.
+      options.register_script = true
+      options.script_name = "build"
+      options.script_command = "ballad play partiture.lua"
     elseif arg_value == "--help" or arg_value == "help" then
       print_help()
       os.exit(0)
@@ -173,7 +204,7 @@ function cli.parse_args(args)
   if #positionals >= 1 and KNOWN_COMMANDS[positionals[1]] then
     options.command = positionals[1]
     if options.command == "init" then
-      options.template = positionals[2]
+      options.template = options.template or positionals[2]
     elseif options.command == "action-run" then
       options.action_file = positionals[2]
     else
@@ -188,6 +219,77 @@ function cli.parse_args(args)
   end
 
   return options
+end
+
+local function available_templates()
+  return table.concat(TEMPLATE_NAMES, ", ")
+end
+
+local function configured_moonstone_bin()
+  for _, variable in ipairs({ "MOONSTONE_BIN", "MOONSTONE_CLI" }) do
+    local value = os.getenv(variable)
+    if value and value ~= "" then return value end
+  end
+  return "moon"
+end
+
+local function moonstone_project_root(start_path)
+  local current = path.absolute(start_path or ".")
+  while current and current ~= "." do
+    if fs.is_file(path.join(current, "moonstone.toml")) then return current end
+    local parent = path.dirname(current)
+    if parent == current then break end
+    current = parent
+  end
+  return nil
+end
+
+local function prepare_moonstone_script(options)
+  if not options.register_script then return nil end
+  local root = moonstone_project_root(".")
+  if not root then
+    process.fail("cannot register Moonstone script `" .. options.script_name .. "`: moonstone.toml was not found; "
+      .. "run `moon init` first or pass --no-script")
+  end
+  if path.absolute(".") ~= root then
+    process.fail("cannot register Moonstone script `" .. options.script_name .. "` from a subdirectory; "
+      .. "run Ballad from the project root " .. root .. " or pass --no-script")
+  end
+  local moon_bin = configured_moonstone_bin()
+  local ok, document = pcall(moonstone_contract.manifest_export, root, moon_bin)
+  if not ok then
+    process.fail("cannot inspect Moonstone scripts through `moon manifest export`: " .. tostring(document)
+      .. "; verify that Moonstone 0.4.2 or newer is on PATH")
+  end
+  for _, script in ipairs((document.manifest or {}).scripts or {}) do
+    if script.name == options.script_name then
+      if script.command == options.script_command then return { unchanged = true, root = root } end
+      if not options.force_script then
+        process.fail("Moonstone script `" .. options.script_name .. "` already exists with a different command\n"
+          .. "  existing: " .. tostring(script.command) .. "\n"
+          .. "  requested: " .. options.script_command .. "\n"
+          .. "Use --force-script to replace it, --script-name to choose another entrypoint, or --no-script.")
+      end
+    end
+  end
+  return { root = root, moon_bin = moon_bin }
+end
+
+local function register_moonstone_script(options, prepared)
+  if not prepared then return end
+  if prepared.unchanged then
+    print("Moonstone script `" .. options.script_name .. "` already uses the conventional Ballad command.")
+    return
+  end
+  local command = process.quote(prepared.moon_bin) .. " -C " .. process.quote(prepared.root)
+    .. " manifest script set " .. process.quote(options.script_name)
+    .. " --command " .. process.quote(options.script_command)
+  if not process.command_ok(command) then
+    os.remove("partiture.lua")
+    process.fail("Moonstone could not set script `" .. options.script_name .. "`; partiture.lua was rolled back. "
+      .. "Run this command to inspect the failure:\n  " .. command)
+  end
+  print("Added Moonstone script `" .. options.script_name .. "`: " .. options.script_command)
 end
 
 local function apply_lua_paths(lua_paths)
@@ -241,17 +343,23 @@ function cli.main(args)
     end
   elseif options.command == "init" then
     if not options.template then
-      process.fail("Usage: ballad init <template>\nRun 'ballad help' for available templates.")
+      process.fail("Usage: ballad init --template <name>\nAvailable templates: " .. available_templates())
     end
-    if io.open("partiture.lua", "r") then
-      process.fail("partiture.lua already exists in the current directory.")
+    if #options.invocation_args > 0 then
+      process.fail("unknown init option or argument: " .. table.concat(options.invocation_args, " ")
+        .. "\nUsage: ballad init --template <name>")
     end
+    if not TEMPLATE_SET[options.template] then
+      process.fail("unknown template `" .. options.template .. "`; available templates: " .. available_templates())
+    end
+    if fs.is_file("partiture.lua") then
+      process.fail("partiture.lua already exists; move it aside or choose a project without a Ballad definition")
+    end
+    local prepared_script = prepare_moonstone_script(options)
     local src_path = get_cli_src_path()
     local template_path = src_path .. "/assets/templates/" .. options.template .. ".lua"
     local fin = io.open(template_path, "r")
-    if not fin then
-      process.fail("Template not found: " .. options.template .. " (searched in " .. template_path .. ")")
-    end
+    if not fin then process.fail("installed Ballad template is missing: " .. template_path) end
     local content = fin:read("*a")
     fin:close()
     local fout = io.open("partiture.lua", "w")
@@ -260,15 +368,7 @@ function cli.main(args)
     end
     fout:write(content)
     fout:close()
-    if options.moonstone_entrypoint then
-      local root = process.capture("pwd -P")
-      local changed = moonstone_contract.add_script_if_missing(root, os.getenv("MOONSTONE_BIN") or "moon", "build", "ballad play partiture.lua")
-      if changed then
-        print("Added Moonstone build entrypoint through the manifest contract.")
-      else
-        print("Left existing Moonstone script `build` unchanged.")
-      end
-    end
+    register_moonstone_script(options, prepared_script)
     print("Successfully initialized partiture.lua from template: " .. options.template)
   elseif options.command == "action-run" then
     if not options.action_file then process.fail("Usage: ballad action-run <action.json>") end

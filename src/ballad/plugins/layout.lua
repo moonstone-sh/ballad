@@ -48,6 +48,8 @@ local function is_default_excluded(relative)
     or relative:match("^%.moonstone/")
     or relative:match("^%.ballad/")
     or relative:match("^dist/")
+    or relative == ".DS_Store"
+    or relative:match("/%.DS_Store$")
     or relative == "moonstone.lock"
 end
 

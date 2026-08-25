@@ -290,6 +290,16 @@ function watcher.watch(ctx, _, spec)
     }
   end
 
+  local control_conditions = ctx.node.control_conditions or {}
+  local function bind_controls(step)
+    if not step or not step.action or #control_conditions == 0 then return end
+    local action_opts = step.action:to_table()
+    action_opts.control_conditions = control_conditions
+    step.action = native_action.new(action_opts)
+  end
+  bind_controls(initial)
+  for _, reaction in ipairs(reactions) do bind_controls(reaction) end
+
   if options.once then
     if initial then
       local cwd_prefix = options.cwd and ("cd " .. shell_quote(options.cwd) .. " && ") or ""

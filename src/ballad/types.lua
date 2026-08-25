@@ -5,6 +5,9 @@
 ---@class Ballad
 ---@field partiture fun(fn: fun(p: PipelineContext)): fun(p: PipelineContext) Define a partiture callback.
 ---@field action table Native action serialization and execution helpers.
+---@field conventions table Deterministic source-package constructors.
+---@field diagnostic table Structured diagnostic constructors and renderers.
+---@field testing table Plan and execution assertions for caller-owned test harnesses.
 ---@field plugins BalladBuiltinPlugins Built-in plugin contracts for typed `p:use(ballad.plugins.*)` calls.
 
 ---@class BalladBuiltinPlugins
@@ -156,6 +159,7 @@
 ---@field source PipelineSourceNamespace Core source nodes.
 ---@field sink PipelineSinkNamespace Core sink nodes; every partiture must declare at least one.
 ---@field task PipelineTaskApi Reusable native actions for finite pipelines and watcher reactions.
+---@field control PipelineControlApi Named facts, predicates, requirements, and graph branches.
 ---@field invocation BalladInvocation Opaque arguments supplied after `ballad play <partiture> --`.
 ---@field files fun(self: PipelineContext, pattern_or_patterns: string|string[]): AssetSet Legacy direct file collection using Lua patterns.
 ---@field asset fun(self: PipelineContext, path: string, opts: AssetOptions|nil): Asset Create an asset for an existing file.
@@ -504,6 +508,32 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 
 ---@class BalladInvocation
 ---@field args string[] Invocation-local copy of opaque caller arguments.
+
+---@class ControlValue
+---@field get fun(self: ControlValue): any Return a defensive copy of the declared fact.
+---@field eq fun(self: ControlValue, expected: any, opts: table|nil): ControlPredicate
+---@field one_of fun(self: ControlValue, expected: any[], opts: table|nil): ControlPredicate
+---@field present fun(self: ControlValue, opts: table|nil): ControlPredicate
+
+---@class ControlPredicate
+---@field result fun(self: ControlPredicate): boolean
+
+---@class ControlDiagnostic
+---@field code string|nil Stable diagnostic code.
+---@field subject string|nil Fact or requirement being checked.
+---@field message string User-facing failure message.
+---@field expected any|nil
+---@field actual any|nil
+---@field hint string|nil Recovery guidance.
+
+---@class PipelineControlApi
+---@field value fun(name: string, value: any, opts: table|nil): ControlValue Declare a named serializable fact.
+---@field all fun(...: ControlPredicate): ControlPredicate Combine predicates with AND.
+---@field any fun(...: ControlPredicate): ControlPredicate Combine predicates with OR.
+---@field not_ fun(predicate: ControlPredicate, opts: table|nil): ControlPredicate Negate a predicate.
+---@field when fun(predicate: ControlPredicate, callback: fun(p: PipelineContext)): any Construct a selected-when-true branch.
+---@field unless fun(predicate: ControlPredicate, callback: fun(p: PipelineContext)): any Construct a selected-when-false branch.
+---@field require fun(name: string, predicate: ControlPredicate, diagnostic: ControlDiagnostic|string): NodeHandle Declare a pre-execution requirement.
 
 ---@class WatcherSpec
 ---@field initial WatcherInitialAction|nil Optional bootstrap action that runs exactly once before change detection.

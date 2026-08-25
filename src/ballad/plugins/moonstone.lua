@@ -556,6 +556,7 @@ return {
     return {
       name = name,
       version = version,
+      kind = pkg.kind or "lib",
       description = description,
       root = loaded.root,
       runtime = runtime_record,

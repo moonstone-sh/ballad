@@ -48,6 +48,9 @@ jobs:
             ./tests/test_watcher.sh
             ./tests/test_native_action.sh
             ./tests/test_invocation_args.sh
+            ./tests/test_init.sh
+            ./tests/test_conventions.sh
+            ./tests/test_control_testing.sh
             ./tests/test_moonstone_contract.sh
             ./tests/test_orbit_report.sh
             ./tests/test_orbit_integration.sh

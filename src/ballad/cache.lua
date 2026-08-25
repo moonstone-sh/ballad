@@ -103,6 +103,7 @@ function cache.compute_key(node, input_results, plugin_version)
     method = node.method,
     plugin_version = plugin_version or "unknown",
     options = node.options,
+    controls = node.control_conditions or {},
     input_hashes = input_hashes,
   }
 
@@ -193,6 +194,7 @@ function cache.compute_native_key(opts, plugin_name, method_name)
     env = opts.env,
     action_id = opts.id,
     toolchain_fingerprint = opts.toolchain_fingerprint,
+    controls = opts.control_conditions or {},
     input_hashes = input_hashes,
     outputs = opts.outputs,
   }

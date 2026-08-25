@@ -7,42 +7,39 @@ such as publishing or a running process explicit.
 
 ## Quick start: export a CLI
 
-Install Ballad as a project tool, then create a Lua entrypoint and a
-`partiture.lua` beside `moonstone.toml`.
+Install Ballad as a project tool, create a Lua entrypoint, then let Ballad add a
+conventional partiture and Moonstone package script.
 
 ```sh
 moon add moonstone/ballad --tool
 moon sync
 mkdir -p src
 printf 'print("Hello from Ballad")\n' > src/main.lua
-```
-
-```lua
-local ballad = require("ballad")
-
-return ballad.partiture(function(p)
-  local moonstone = p:use(ballad.plugins.moonstone)
-  local layout = p:use(ballad.plugins.layout)
-
-  local project = moonstone.project({ root = "." })
-  local app = layout.exec(project, {
-    name = project.name,
-    bin = project.name,
-    entry = "src/main.lua",
-    interpreter = "lua",
-  })
-
-  p.sink.directory(app, {
-    out = "dist/" .. project.name,
-    file_graph = true,
-  })
-end)
+moon exec ballad -- init --template executable
+moon run package
 ```
 
 ```sh
-moon exec ballad play partiture.lua
 ./dist/<project-name>/bin/<project-name>
 ```
+
+Choose `love2d` for a `.love` application or `registry` for a source package.
+The registry template derives package metadata and deterministic source-tree
+provisions from `moonstone.toml`; edit the generated `partiture.lua` only for
+project-specific layout, native build, or release policy. Run
+`moon exec ballad -- init --template <name> --no-script` if you do not want the
+default `package` script.
+
+Partiture arguments remain ordinary Lua values; Ballad does not impose a CLI
+parser. Named `p.control` values can make the choices that affect packaging
+visible in graph reports and deterministic tests. The optional
+`ballad.testing` Lua module inspects plans and execution results without
+requiring a particular test runner.
+
+Control handles are immutable, and structured facts are exposed through
+defensive copies. Branch callbacks construct both sides of the inspectable
+graph, so callbacks must remain declarative; only nodes in the selected branch
+execute effects.
 
 The release is an inspectable closure, not a pile of incidental build files:
 

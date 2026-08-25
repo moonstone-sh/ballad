@@ -3,6 +3,9 @@
 local pipeline = {}
 local graph_mod = require("ballad.graph")
 local plugin_host = require("ballad.plugin_host")
+local conventions = require("ballad.conventions")
+local control_mod = require("ballad.control")
+local diagnostic = require("ballad.diagnostic")
 
 ---@class NodeHandle
 ---@field _id? string
@@ -11,8 +14,8 @@ local plugin_host = require("ballad.plugin_host")
 local NodeHandle = {}
 NodeHandle.__index = NodeHandle
 
-function NodeHandle.new(id, graph, extra_meta)
-  local self = setmetatable({ _id = id, _graph = graph }, NodeHandle)
+function NodeHandle.new(id, graph, extra_meta, context)
+  local self = setmetatable({ _id = id, _graph = graph, _context = context }, NodeHandle)
   if extra_meta then
     for k, v in pairs(extra_meta) do
       self[k] = v
@@ -52,9 +55,10 @@ function NodeHandle:_select_orbit_product(name)
     cacheable = false,
     parallel_safe = true,
   })
+  if self._context then self._context:_attach_controls(node) end
   return NodeHandle.new(node.id, self._graph, {
     orbit_product = { orbit = orbit.name, name = name },
-  })
+  }, self._context)
 end
 
 function NodeHandle:product(name)
@@ -229,6 +233,7 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
         parallel_safe = method_contract.parallel_safe,
         enabled = options.enabled,
       })
+      pipeline_ctx:_attach_controls(node)
       local dependencies = options.depends_on
       if dependencies then
         local handles = getmetatable(dependencies) == NodeHandle and { dependencies } or dependencies
@@ -264,10 +269,11 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
         if ok then
           extra_meta = meta
         else
+          if diagnostic.is(meta) then error(meta, 0) end
           error("Plugin '" .. name .. "' " .. method_name .. "_prepare failed: " .. tostring(meta))
         end
       end
-      return NodeHandle.new(node.id, graph, extra_meta)
+      return NodeHandle.new(node.id, graph, extra_meta, pipeline_ctx)
     end
   end
   if name == "moonstone" or name == "ballad.plugins.moonstone" then
@@ -275,8 +281,12 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
       package = function(...)
         return self:registry_package(...)
       end,
-      source_package = function(...)
-        return self:registry_source_package(...)
+      source_package = function(project, opts)
+        opts = opts or {}
+        if opts.materialize == nil or opts.collect ~= nil or opts.include_add ~= nil then
+          opts = conventions.source_package(project, opts)
+        end
+        return self:registry_source_package(project, opts)
       end,
       runtime = function(...)
         return self:registry_runtime(...)
@@ -298,6 +308,13 @@ end
 ---@field _assets table<string, Asset>
 local PipelineContext = {}
 PipelineContext.__index = PipelineContext
+
+local run_sequence = 0
+
+local function next_run_id()
+  run_sequence = run_sequence + 1
+  return os.date("%Y%m%d-%H%M%S") .. "-" .. string.format("%03d", run_sequence)
+end
 
 local function native_assets_from_cache(graph, entry)
   local assets = graph_mod.AssetSet.new()
@@ -334,15 +351,19 @@ function PipelineContext.new(graph, host, jobs, invocation_args)
     _metadata = {},
     _warnings = {},
     _assets = {},
-    _run_id = os.date("%Y%m%d-%H%M%S"),
+    _run_id = next_run_id(),
     _jobs = jobs or 1,
     _pending_tasks = {},
+    _control_stack = {},
+    _control_names = {},
   }, PipelineContext)
   self.invocation = { args = args }
   graph.metadata.invocation = { args = args }
+  graph.metadata.controls = {}
   self.source = {}
   self.sink = {}
   self.task = {}
+  self.control = {}
   self.source.directory = function(dir_path, opts)
     return self:_core_node("ballad.core.source", "directory", {}, opts or { path = dir_path }, function(o) o.path = o.path or dir_path end)
   end
@@ -405,7 +426,219 @@ function PipelineContext.new(graph, host, jobs, invocation_args)
     end
     return handle
   end
+  self.control.value = function(name, value, opts)
+    return self:_control_value(name, value, opts)
+  end
+  self.control.all = function(...)
+    return self:_control_combine("all", { ... })
+  end
+  self.control.any = function(...)
+    return self:_control_combine("any", { ... })
+  end
+  self.control.not_ = function(predicate, opts)
+    return self:_control_combine("not", { predicate }, opts)
+  end
+  self.control.when = function(predicate, callback)
+    return self:_control_branch(predicate, callback, "when")
+  end
+  self.control.unless = function(predicate, callback)
+    if not control_mod.is_predicate(predicate) or control_mod.context(predicate) ~= self then
+      error("control.unless expects a predicate created by this pipeline")
+    end
+    local inverse = self:_control_combine("not", { predicate })
+    return self:_control_branch(inverse, callback, "unless")
+  end
+  self.control.require = function(name, predicate, spec)
+    return self:_control_requirement(name, predicate, spec)
+  end
   return self
+end
+
+local function require_control_predicate(context, value, subject)
+  if not control_mod.is_predicate(value) or control_mod.context(value) ~= context then
+    error(subject .. " expects a predicate created by this pipeline")
+  end
+  return value
+end
+
+function PipelineContext:_claim_control_name(name, kind)
+  if type(name) ~= "string" or name == "" then error(kind .. " requires a non-empty name") end
+  local previous = self._control_names[name]
+  if previous then
+    error("control name `" .. name .. "` is already used by " .. previous
+      .. "; values, named predicates, and requirements share one namespace")
+  end
+  self._control_names[name] = kind
+end
+
+function PipelineContext:_record_control(node, entry)
+  entry.id = node.id
+  self._graph.metadata.controls[#self._graph.metadata.controls + 1] = entry
+end
+
+function PipelineContext:_control_value(name, value, opts)
+  opts = opts or {}
+  if type(opts) ~= "table" then error("control.value options must be a table") end
+  self:_claim_control_name(name, "control.value")
+  control_mod.validate_serializable(value, "control value " .. name)
+  value = control_mod.copy_serializable(value)
+  local source = opts.source or "explicit"
+  if source ~= "explicit" and source ~= "invocation" and source ~= "project" and source ~= "requirement" then
+    error("control value " .. name .. " has unsupported source " .. tostring(source))
+  end
+  local node = self._graph:add_node({
+    plugin = "ballad.core.control",
+    method = "value",
+    role = "control",
+    label = name,
+    options = { name = name, value = value, source = source },
+    cacheable = false,
+    parallel_safe = true,
+  })
+  self:_record_control(node, { kind = "value", name = name, value = value, source = source })
+  return control_mod.new_value(self, {
+    node_id = node.id, name = name, value = value, source = source,
+    identity = { kind = "value", name = name, value = value, source = source },
+  })
+end
+
+function PipelineContext:_control_predicate(operator, operands, detail, opts)
+  opts = opts or {}
+  if type(opts) ~= "table" then error("control predicate options must be a table") end
+  if detail.expected ~= nil then detail.expected = control_mod.copy_serializable(detail.expected) end
+  local ids = {}
+  local names = {}
+  local operand_identities = {}
+  for index, operand in ipairs(operands or {}) do
+    if not control_mod.is_value(operand) and not control_mod.is_predicate(operand) then
+      error("control " .. operator .. " operand " .. tostring(index) .. " is not a control value or predicate")
+    end
+    if control_mod.context(operand) ~= self then error("control predicates cannot combine different pipelines") end
+    ids[#ids + 1] = control_mod.node_id(operand)
+    names[#names + 1] = control_mod.name(operand) or control_mod.expression(operand) or control_mod.node_id(operand)
+    operand_identities[#operand_identities + 1] = control_mod.identity(operand)
+  end
+  local expression = opts.expression
+  if not expression then
+    if operator == "eq" then
+      expression = tostring(names[1]) .. " == " .. control_mod.describe(detail.expected)
+    elseif operator == "one_of" then
+      expression = tostring(names[1]) .. " in declared values"
+    elseif operator == "present" then
+      expression = tostring(names[1]) .. " is present"
+    elseif operator == "not" then
+      expression = "not (" .. tostring(names[1]) .. ")"
+    else
+      expression = operator .. "(" .. table.concat(names, ", ") .. ")"
+    end
+  end
+  local name = opts.name
+  if name ~= nil then self:_claim_control_name(name, "control predicate") end
+  local label = name or expression
+  local options = {
+    name = name,
+    operator = operator,
+    expression = expression,
+    expected = detail.expected,
+    result = detail.result == true,
+    operands = operand_identities,
+  }
+  local node = self._graph:add_node({
+    plugin = "ballad.core.control",
+    method = "predicate",
+    role = "control",
+    label = label,
+    controls = ids,
+    control_conditions = { options },
+    options = options,
+    cacheable = false,
+    parallel_safe = true,
+  })
+  self:_record_control(node, {
+    kind = "predicate", name = name, label = label, operator = operator,
+    expression = expression, expected = detail.expected, result = detail.result == true,
+    operands = operand_identities,
+  })
+  return control_mod.new_predicate(self, {
+    node_id = node.id, name = name, value = detail.result == true, expression = expression,
+    identity = options,
+  })
+end
+
+function PipelineContext:_control_combine(operator, operands, opts)
+  if opts ~= nil and type(opts) ~= "table" then error("control." .. operator .. " options must be a table") end
+  if operator == "not" and #operands ~= 1 then error("control.not_ expects one predicate") end
+  if operator ~= "not" and #operands == 0 then error("control." .. operator .. " expects at least one predicate") end
+  local result = operator == "all"
+  if operator == "any" then result = false end
+  for index, operand in ipairs(operands) do
+    operand = require_control_predicate(self, operand, "control." .. operator .. " operand " .. tostring(index))
+    local operand_result = control_mod.result(operand)
+    if operator == "all" then result = result and operand_result
+    elseif operator == "any" then result = result or operand_result
+    else result = not operand_result end
+  end
+  return self:_control_predicate(operator, operands, { result = result }, opts)
+end
+
+function PipelineContext:_control_branch(predicate, callback, kind)
+  predicate = require_control_predicate(self, predicate, "control." .. kind)
+  if type(callback) ~= "function" then error("control." .. kind .. " expects a callback") end
+  self._control_stack[#self._control_stack + 1] = predicate
+  local ok, result = pcall(callback, self)
+  self._control_stack[#self._control_stack] = nil
+  if not ok then error(result, 0) end
+  return result
+end
+
+function PipelineContext:_control_requirement(name, predicate, spec)
+  predicate = require_control_predicate(self, predicate, "control.require")
+  self:_claim_control_name(name, "control.require")
+  local diag = diagnostic.new(spec or { message = "Requirement " .. name .. " was not satisfied" })
+  local options = {
+    name = name,
+    passed = control_mod.result(predicate),
+    diagnostic = {
+      code = diag.code, subject = diag.subject, message = diag.message,
+      expected = diag.expected, actual = diag.actual, hint = diag.hint,
+    },
+  }
+  control_mod.validate_serializable(options.diagnostic, "requirement diagnostic " .. name)
+  options.diagnostic = control_mod.copy_serializable(options.diagnostic)
+  local node = self._graph:add_node({
+    plugin = "ballad.core.control",
+    method = "requirement",
+    role = "control",
+    label = name,
+    controls = { control_mod.node_id(predicate) },
+    control_conditions = { control_mod.identity(predicate) },
+    options = options,
+    cacheable = false,
+    parallel_safe = true,
+  })
+  self:_attach_controls(node)
+  self:_record_control(node, {
+    kind = "requirement", name = name, passed = control_mod.result(predicate),
+    diagnostic = options.diagnostic,
+  })
+  return NodeHandle.new(node.id, self._graph, { passed = control_mod.result(predicate), name = name }, self)
+end
+
+function PipelineContext:_attach_controls(node)
+  for _, predicate in ipairs(self._control_stack or {}) do
+    local present = false
+    for _, control_id in ipairs(node.controls) do
+      if control_id == control_mod.node_id(predicate) then present = true; break end
+    end
+    if not present then
+      local predicate_id = control_mod.node_id(predicate)
+      node.controls[#node.controls + 1] = predicate_id
+      node.control_conditions[#node.control_conditions + 1] = control_mod.identity(predicate)
+      self._graph.edges[predicate_id] = self._graph.edges[predicate_id] or {}
+      table.insert(self._graph.edges[predicate_id], node.id)
+    end
+    if not control_mod.result(predicate) then node.enabled = false end
+  end
 end
 
 function PipelineContext:_core_node(plugin, method, inputs, opts, mutate_opts)
@@ -425,7 +658,9 @@ function PipelineContext:_core_node(plugin, method, inputs, opts, mutate_opts)
       error(method .. " expects pipeline node handles as inputs")
     end
   end
-  local role = plugin == "ballad.core.source" and "source" or (plugin == "ballad.core.action" and "transform" or "sink")
+  local role = plugin == "ballad.core.source" and "source"
+    or (plugin == "ballad.core.action" and "transform"
+    or (plugin == "ballad.core.control" and "control" or "sink"))
   local node = self._graph:add_node({
     plugin = plugin,
     method = method,
@@ -439,7 +674,8 @@ function PipelineContext:_core_node(plugin, method, inputs, opts, mutate_opts)
     parallel_safe = method ~= "stdout",
     enabled = opts.enabled,
   })
-  return NodeHandle.new(node.id, self._graph)
+  self:_attach_controls(node)
+  return NodeHandle.new(node.id, self._graph, nil, self)
 end
 
 ---Import a plugin. Prefer `ballad.plugins.*`; string literal overloads are provided
@@ -544,7 +780,8 @@ function PipelineContext:node(plugin, method, inputs, opts)
     inputs = input_ids,
     options = opts,
   })
-  return NodeHandle.new(node.id, self._graph)
+  self:_attach_controls(node)
+  return NodeHandle.new(node.id, self._graph, nil, self)
 end
 
 ---@param key string
@@ -563,7 +800,9 @@ end
 ---@param message string
 ---@return never
 function PipelineContext:fail(message)
-  error("Pipeline failed: " .. message)
+  if diagnostic.is(message) then diagnostic.raise(message) end
+  if type(message) == "table" then diagnostic.raise(message) end
+  diagnostic.raise({ code = "pipeline_failure", message = tostring(message) })
 end
 
 ---Normalize a tool path: absolute paths pass through, relative names are resolved via PATH.
@@ -609,6 +848,10 @@ end
 ---@return AssetSet asset set representing produced outputs
 function PipelineContext:native_task(opts)
   opts = opts or {}
+  local task_opts = {}
+  for key, value in pairs(opts) do task_opts[key] = value end
+  task_opts.control_conditions = self._metadata._current_control_conditions or opts.control_conditions
+  opts = task_opts
   local tool = opts.tool or (opts.cmd and opts.cmd:match("^%S+")) or error("native_task: missing required field 'tool' or 'cmd'")
   local args = opts.args or {}
   local cmd_opt = opts.cmd
@@ -813,6 +1056,7 @@ function PipelineContext:native_task(opts)
       kind = "native",
       id = task_id,
       exit_code = exit_code,
+      stdout = stdout_text ~= "" and stdout_text or nil,
       stderr = stderr_text ~= "" and stderr_text or nil,
       missing_outputs = #missing_outputs > 0 and missing_outputs or nil,
       timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
@@ -831,6 +1075,7 @@ function PipelineContext:native_task(opts)
       "Command:\n  " .. cmd .. "\n\n" ..
       "Cwd:\n  " .. cwd .. "\n\n" ..
       "Exit code:\n  " .. tostring(exit_code) .. "\n\n" ..
+      (stdout_text ~= "" and ("Stdout:\n  " .. stdout_text .. "\n\n") or "") ..
       (stderr_text ~= "" and ("Stderr:\n  " .. stderr_text .. "\n\n") or "") ..
       "Declared outputs:\n  " .. table.concat(outputs, "\n  ")
     )
@@ -1037,6 +1282,7 @@ function PipelineContext:_flush_pending_tasks()
             kind = "native",
             id = task.task_id,
             exit_code = result.exit_code,
+            stdout = result.stdout ~= "" and result.stdout or nil,
             stderr = result.stderr ~= "" and result.stderr or nil,
             worker = 1,
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
@@ -1053,6 +1299,7 @@ function PipelineContext:_flush_pending_tasks()
             "Native task failed: " .. (task.opts.id or task.opts.description or "native task") .. "\n\n" ..
             "Tool:\n  " .. task.opts.tool .. "\n\n" ..
             "Exit code:\n  " .. tostring(result.exit_code) .. "\n\n" ..
+            (result.stdout ~= "" and ("Stdout:\n  " .. result.stdout .. "\n\n") or "") ..
             (result.stderr ~= "" and ("Stderr:\n  " .. result.stderr .. "\n\n") or "")
           )
         end
@@ -1177,10 +1424,21 @@ local function core_handler(plugin, method)
   local process = require("ballad.process")
   local dkjson = require("dkjson")
 
-  if plugin == "ballad.core.action" and method == "native" then
+  if plugin == "ballad.core.control" then
+    return function(ctx, _, opts)
+      if method == "requirement" and not opts.passed then
+        local value = diagnostic.new(opts.diagnostic or {})
+        value.node = ctx.node.id .. " (requirement " .. tostring(opts.name) .. ")"
+        diagnostic.raise(value)
+      end
+      return graph_mod.AssetSet.new()
+    end
+  elseif plugin == "ballad.core.action" and method == "native" then
     return function(ctx, _, opts)
       local native_action = require("ballad.native_action")
-      local action = native_action.new(opts.action)
+      local action_opts = native_action.new(opts.action):to_table()
+      action_opts.control_conditions = ctx.node.control_conditions or {}
+      local action = native_action.new(action_opts)
       local result = native_action.run(action)
       local task_id = ctx.graph:add_native_task({
         kind = "native_action",
@@ -1365,6 +1623,17 @@ function Pipeline:plan(debug_dir)
 
   local sinks = self._graph:terminal_sinks()
   if #sinks == 0 then
+    local disabled = {}
+    for id, node in pairs(self._graph.nodes) do
+      if node.role == "sink" and node.enabled == false then
+        disabled[#disabled + 1] = id .. " (" .. tostring(node.options.product or node.label or node.method) .. ")"
+      end
+    end
+    table.sort(disabled)
+    if #disabled > 0 then
+      error("Pipeline has no selected sink; every declared sink was disabled by controls:\n  "
+        .. table.concat(disabled, "\n  "))
+    end
     error("Pipeline requires at least one explicit sink (use p.sink.*)")
   end
 
@@ -1397,13 +1666,40 @@ function Pipeline:plan(debug_dir)
     for _, input_id in ipairs(node.inputs or {}) do
       visit(input_id)
     end
+    for _, control_id in ipairs(node.controls or {}) do
+      visit(control_id)
+    end
   end
   for _, sink in ipairs(sinks) do visit(sink.id) end
-
-  local order = {}
-  for _, id in ipairs(self._graph:topological_order()) do
-    if reachable[id] then table.insert(order, id) end
+  for id, node in pairs(self._graph.nodes) do
+    if node.role == "control" and node.enabled ~= false then visit(id) end
   end
+  for id in pairs(reachable) do
+    local node = self._graph.nodes[id]
+    for _, input_id in ipairs(node.inputs or {}) do
+      local input = self._graph.nodes[input_id]
+      if input and input.enabled == false then
+        error("Enabled node " .. id .. " (" .. node.plugin .. "." .. node.method
+          .. ") depends on disabled node " .. input_id
+          .. "; place the consumer under the same control branch")
+      end
+    end
+  end
+
+  local control_order = {}
+  local work_order = {}
+  for _, id in ipairs(self._graph:topological_order()) do
+    if reachable[id] then
+      if self._graph.nodes[id].role == "control" then
+        table.insert(control_order, id)
+      else
+        table.insert(work_order, id)
+      end
+    end
+  end
+  local order = {}
+  for _, id in ipairs(control_order) do order[#order + 1] = id end
+  for _, id in ipairs(work_order) do order[#order + 1] = id end
 
   local total_weight = 0
   for _, id in ipairs(order) do
@@ -1542,10 +1838,12 @@ function Pipeline:execute()
 
     self._context._metadata._current_plugin = node.plugin
     self._context._metadata._current_method = node.method
+    self._context._metadata._current_control_conditions = node.control_conditions or {}
 
     local ok, result = pcall(handler, ctx, input_results, node.options)
     if not ok then
       write_debug_graph()
+      if diagnostic.is(result) then error(result, 0) end
       error("Pipeline node " .. node_id .. " (" .. node.plugin .. "." .. node.method .. ") failed: " .. tostring(result))
     end
 

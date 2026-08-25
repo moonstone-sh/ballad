@@ -1,5 +1,6 @@
 local pipeline = require("ballad.pipeline")
 local plugin_host = require("ballad.plugin_host")
+local diagnostic = require("ballad.diagnostic")
 
 ---@alias PartitureFn fun(ctx: PipelineContext): any
 
@@ -14,6 +15,7 @@ function partiture.build(fn, jobs, invocation_args)
   local p = pipeline.new(host, jobs, invocation_args)
   local ok, err = pcall(fn, p:context())
   if not ok then
+    if diagnostic.is(err) then error(err, 0) end
     error("partiture construction failed: " .. tostring(err))
   end
   return p
@@ -30,6 +32,7 @@ function partiture.load(filepath, jobs, invocation_args)
   end
   local ok, result = pcall(chunk)
   if not ok then
+    if diagnostic.is(result) then error(result, 0) end
     error("Partiture file '" .. filepath .. "' failed to evaluate: " .. tostring(result))
   end
   if type(result) ~= "function" then

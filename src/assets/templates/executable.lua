@@ -5,9 +5,9 @@ return ballad.partiture(function(p)
   local layout = p:use(ballad.plugins.layout)
   local project = moonstone.project({ root = "." })
   local app = layout.exec(project, {
-    name = "myapp",
+    name = project.name,
     entry = "src/main.lua",
-    bin = "myapp",
+    bin = project.name:match("([^/]+)$") or project.name,
     interpreter = "lua",
   })
 

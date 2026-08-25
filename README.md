@@ -8,22 +8,160 @@ Ballad runs partitures. With no command, it defaults to `partiture.lua`:
 
 ```sh
 moon sync
-moon exec ballad
+moon exec ballad --
 ```
 
 You can also pass a partiture explicitly:
 
 ```sh
-moon exec ballad play partiture.lua
-moon exec ballad ./release.partiture.lua
+moon exec ballad -- play partiture.lua
+moon exec ballad -- ./release.partiture.lua
 ```
+
+### Initialize by convention
+
+Generate a partiture and register a `package` script in `moonstone.toml` through
+Moonstone's CLI:
+
+```sh
+moon exec ballad -- init --template executable
+moon run package
+```
+
+Available templates are `executable`, `love2d`, and `registry`. Use
+`--no-script` when only the file should be generated, `--script-name <name>` to
+choose another entrypoint, and `--force-script` to replace a conflicting script.
+Ballad reports the existing and requested commands when a conflict occurs; it
+does not silently replace project intent.
+
+The `registry` template uses source-tree conventions instead of enumerating
+every provision:
+
+```lua
+local convention = ballad.conventions
+local artifact = moonstone.registry.source_package(project, {
+  collect = {
+    lua_modules = {
+      convention.tree("src", {
+        prefix = "my_package",
+        strip_prefix = "my_package/",
+        root_module = "my_package.lua",
+      }),
+    },
+    bins = {
+      convention.file("bin/my-tool", "bin/my-tool"),
+    },
+  },
+})
+```
+
+`source_package` infers the package name, version, kind, description, standard
+source patterns, exclusions, and command materializer from the prepared
+Moonstone project. Trees expand deterministically and reject missing roots,
+empty selections, and duplicate provision names with collection-specific
+diagnostics. `include`, `exclude`, `overrides`, and explicit `file` entries keep
+exceptions visible without turning the partiture into a generated file list.
+
+Native builds can declare host paths without embedding machine-specific values:
+
+```lua
+materialize = {
+  command = "make",
+  external_paths = {
+    convention.external.include("sqlite"), -- SQLITE_INCDIR
+    convention.external.library("sqlite"), -- SQLITE_LIBDIR
+  },
+}
+```
+
+Moonstone resolves those requirements in the target materialization environment
+and reports the dependency, expected variable, and discovery attempts if it
+cannot satisfy one.
+
+### Deterministic controls
+
+Ballad deliberately leaves argument parsing to normal Lua. Parse
+`p.invocation.args` directly or use any Lua CLI library, then promote only the
+values that affect the graph into named controls:
+
+```lua
+local mode = p.control.value("mode", parsed.mode, { source = "invocation" })
+local release = mode:eq("release", { name = "release-selected" })
+
+p.control.require("explicit-mode", mode:present(), {
+  code = "missing_mode",
+  subject = "--mode",
+  message = "A build mode is required",
+  expected = "--mode <mode>",
+  actual = parsed.mode,
+  hint = "Pass the option after the partiture argument delimiter.",
+})
+
+p.control.when(release, function()
+  local artifact = make_release()
+  p.sink.artifact(artifact, { out = "dist/release", product = "release" })
+end)
+
+p.control.unless(release, function()
+  local layout = make_development_layout()
+  p.sink.directory(layout, { out = "dist/dev", product = "development" })
+end)
+```
+
+Both branches remain inspectable in `graph.json`. Only the selected branch is
+reachable in the execution plan; disabled nodes cannot run effects or use task
+caches. Control values, predicates, and requirements are included in graph and
+export-report identity. Values must be serializable and must not contain
+secrets.
+
+`when` and `unless` are graph-construction scopes, not Lua flow-control
+statements. Ballad invokes every branch callback while loading the partiture so
+the complete graph remains inspectable. Keep callbacks declarative: filesystem
+writes, subprocesses, network calls, and other effects belong in graph nodes.
+Those nodes execute only when their branch is selected.
+
+Control handles are immutable. `value:get()` returns a defensive copy for code
+that needs to inspect a structured fact; changing that copy cannot alter the
+recorded graph or cache identity. Values, explicitly named predicates, and
+requirements share one name namespace. This makes reports and
+`:assert_control(...)` testing lookups unambiguous.
+
+Use `all`, `any`, and `not_` to combine predicates. Legacy `enabled = false`
+remains supported, but named controls are preferred whenever a choice affects
+release behavior.
+
+### Testing partitures
+
+`ballad.testing` is a Lua assertion library, not a test runner. The caller owns
+fixtures, the current workspace, and environment isolation:
+
+```lua
+local testing = require("ballad.testing")
+local subject = testing.load("partiture.lua", {
+  args = { "release" },
+})
+
+subject:plan()
+  :assert_control("mode", "release")
+  :assert_product("release", true)
+  :assert_product("development", false)
+
+subject:execute()
+  :assert_success()
+  :assert_product("release")
+  :assert_path("dist/release/package.toml")
+```
+
+Plans can also assert graph nodes and source-package provisions. Execution
+results can assert structured diagnostic codes, which makes failure behavior
+testable without parsing Lua stack traces.
 
 ## Partiture API
 
 Plugins provide transforms only. Use `p.sink.*` for terminal outputs; every partiture must declare at least one explicit sink.
 
 ```lua
-  local ballad = require("ballad")
+local ballad = require("ballad")
 
 return ballad.partiture(function(p)
   local moonstone = p:use(ballad.plugins.moonstone)
@@ -317,29 +455,26 @@ Use `moonstone.registry.source_package` when a Moonstone package should publish 
 
 ```lua
 local project = moonstone.project({ root = "." })
+local convention = ballad.conventions
 local source_artifact = moonstone.registry.source_package(project, {
-  name = "user/meteorite",
-  version = project.version,
-  kind = "lib",
-  include = {
-    "moonstone.toml",
-    "build.zig",
-    "src/**",
-    "native/**",
-    "README.md",
-    "REGISTRY_README.md",
-  },
-  exclude = { ".moonstone/**", ".ballad/**", "zig-cache/**", "zig-out/**", ".git/**" },
+  include_add = { "native/**" },
   materialize = {
-    type = "command",
     command = "zig build install-native",
-    collect = {
-      lua_modules = {
-        { name = "meteorite.lua", path = "src/app.lua" },
-      },
-      lua_cmodules = {
-        { name = "meteorite_native.so", path = ".moonstone/env/lib/lua/${lua_abi}/meteorite_native.so" },
-      },
+    external_paths = {
+      convention.external.include("sqlite"),
+      convention.external.library("sqlite"),
+    },
+    ldflags = { "-L$(SQLITE_LIBDIR)" },
+  },
+  collect = {
+    lua_modules = {
+      convention.tree("src", {
+        prefix = "meteorite",
+        overrides = { ["app.lua"] = "meteorite.lua" },
+      }),
+    },
+    lua_cmodules = {
+      convention.file("meteorite_native.so", ".moonstone/env/lib/lua/${lua_abi}/meteorite_native.so"),
     },
   },
 })
@@ -355,8 +490,8 @@ environment variable inside the build command:
 materialize = {
   type = "native_cmodule",
   external_paths = {
-    { dependency = "SQLITE", variable = "SQLITE_INCDIR", kind = "include" },
-    { dependency = "SQLITE", variable = "SQLITE_LIBDIR", kind = "library" },
+    convention.external.include("sqlite"),
+    convention.external.library("sqlite"),
   },
   ldflags = { "-L$(SQLITE_LIBDIR)" },
   -- input/output declarations omitted

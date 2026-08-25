@@ -6,6 +6,9 @@ require("ballad.types")
 return {
   partiture = partiture.partiture,
   action = require("ballad.native_action"),
+  conventions = require("ballad.conventions"),
+  diagnostic = require("ballad.diagnostic"),
+  testing = require("ballad.testing"),
   plugins = {
     layout = require("ballad.plugins.layout"),
     love = require("ballad.plugins.love"),

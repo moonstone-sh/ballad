@@ -86,9 +86,11 @@ end
 ---@field id string
 ---@field plugin string
 ---@field method string
----@field role "source"|"transform"|"sink"
+---@field role "source"|"transform"|"sink"|"control"
 ---@field label string|nil
 ---@field inputs string[] node ids
+---@field controls string[] control node ids
+---@field control_conditions table[] canonical control expressions
 ---@field outputs string[] node ids
 ---@field options table<string, any>
 ---@field metadata table<string, any>
@@ -113,6 +115,8 @@ function Node.new(opts)
     role = opts.role or "transform",
     label = opts.label or nil,
     inputs = opts.inputs or {},
+    controls = opts.controls or {},
+    control_conditions = opts.control_conditions or {},
     outputs = opts.outputs or {},
     options = opts.options or {},
     metadata = opts.metadata or {},
@@ -179,6 +183,8 @@ function Graph:add_node(opts)
     role = opts.role,
     label = opts.label,
     inputs = opts.inputs or {},
+    controls = opts.controls or {},
+    control_conditions = opts.control_conditions or {},
     options = opts.options or {},
     metadata = opts.metadata or {},
     effects = opts.effects or {},
@@ -191,6 +197,10 @@ function Graph:add_node(opts)
   for _, input_id in ipairs(node.inputs) do
     self.edges[input_id] = self.edges[input_id] or {}
     table.insert(self.edges[input_id], id)
+  end
+  for _, control_id in ipairs(node.controls) do
+    self.edges[control_id] = self.edges[control_id] or {}
+    table.insert(self.edges[control_id], id)
   end
   return node
 end
@@ -314,6 +324,8 @@ function Graph:to_json()
       role = node.role,
       label = node.label,
       inputs = node.inputs,
+      controls = node.controls,
+      control_conditions = node.control_conditions,
       options = node.options,
       metadata = node.metadata,
       effects = node.effects,
@@ -339,10 +351,12 @@ function Graph:to_json()
   for _, node in pairs(self.nodes) do
     table.insert(nodes, serialize_node(node))
   end
+  table.sort(nodes, function(left, right) return left.id < right.id end)
   local assets = {}
   for _, asset in pairs(self.assets) do
     table.insert(assets, serialize_asset(asset))
   end
+  table.sort(assets, function(left, right) return left.id < right.id end)
   return dkjson.encode({
     id = self.id,
     metadata = self.metadata,

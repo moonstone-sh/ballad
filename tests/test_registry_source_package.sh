@@ -151,4 +151,31 @@ luajit "$BALLAD_ROOT/src/main.lua" play partiture_project.lua > "$WORK_DIR/run-p
 test -f dist/registry/meteorite-project/package.toml || { echo "FAIL: project input package.toml missing"; exit 1; }
 grep -q 'version = "1.2.3"' dist/registry/meteorite-project/package.toml || { echo "FAIL: project version not used"; exit 1; }
 
+cat > "$WORK_DIR/partiture_conventional.lua" <<'LUA'
+local ballad = require("ballad")
+
+return ballad.partiture(function(p)
+  local moonstone = p:use(ballad.plugins.moonstone)
+  local convention = ballad.conventions
+  local project = moonstone.project({ root = "." })
+  local source_artifact = moonstone.registry.source_package(project, {
+    collect = {
+      lua_modules = {
+        convention.tree("src", {
+          prefix = "meteorite",
+          overrides = { ["app.lua"] = "meteorite.lua" },
+        }),
+      },
+    },
+  })
+  p.sink.artifact(source_artifact, { out = "dist/registry/meteorite-conventional" })
+end)
+LUA
+
+luajit "$BALLAD_ROOT/src/main.lua" play partiture_conventional.lua > "$WORK_DIR/run-conventional.log" 2>&1 || { cat "$WORK_DIR/run-conventional.log"; exit 1; }
+test -f dist/registry/meteorite-conventional/package.toml || { echo "FAIL: conventional package.toml missing"; exit 1; }
+grep -q 'name = "user/meteorite"' dist/registry/meteorite-conventional/package.toml || { echo "FAIL: conventional package name was not inferred"; exit 1; }
+grep -q 'version = "1.2.3"' dist/registry/meteorite-conventional/package.toml || { echo "FAIL: conventional package version was not inferred"; exit 1; }
+grep -q 'name = "meteorite.lua"' dist/registry/meteorite-conventional/package.toml || { echo "FAIL: conventional tree was not collected"; exit 1; }
+
 echo "PASS: registry.source_package emits source package descriptor and archive"
