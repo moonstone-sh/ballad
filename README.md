@@ -300,7 +300,7 @@ local suite = layout.directory({
   { from = worker.product("release"), to = "worker" },
 })
 
-local package = p.registry.package(suite, {
+local package = moonstone.registry.package(suite, {
   name = "acme/platform-suite",
   version = "1.0.0",
 })
@@ -488,7 +488,7 @@ environment variable inside the build command:
 
 ```lua
 materialize = {
-  type = "native_cmodule",
+  command = "make",
   external_paths = {
     convention.external.include("sqlite"),
     convention.external.library("sqlite"),

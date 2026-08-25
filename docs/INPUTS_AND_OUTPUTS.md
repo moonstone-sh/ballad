@@ -1,6 +1,6 @@
 # Native Tasks, Inputs, and Outputs in Ballad
 
-Ballad partitures support executing native tools, build commands, and Moonstone project scripts via native tasks (`moonstone:run`, `moonstone:exec`, and `p:native_task`).
+Ballad partitures support executing native tools, build commands, and Moonstone project scripts via native tasks (`moonstone:run`, `moonstone:exec`, and `p.task.native`).
 
 This document explains the semantics of **`inputs`**, **`outputs`**, **caching**, **change invalidation**, and **terminal sinks**.
 
@@ -36,7 +36,7 @@ for genuine task ordering, not as a change trigger.
 
 When building projects that require pre-export compilation (such as transpiling MoonScript `src/*.moon` to `dist/src/*.lua`, compiling C/Zig extensions, or running asset generators), native tasks define how subprocesses interact with Ballad's graph and cache system.
 
-```
+```text
  ┌────────────────┐     ┌────────────────┐     ┌────────────────┐     ┌────────────────┐
  │ 1. Pre-Create  │ ──► │ 2. Subprocess  │ ──► │ 3. Output Check│ ──► │ 4. AssetSet    │
  │    Directories │     │    Execution   │     │    Verification│     │    Propagation │
