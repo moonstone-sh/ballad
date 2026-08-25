@@ -30,7 +30,7 @@ jobs:
       - name: Install release tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y b3sum
+          sudo apt-get install -y b3sum zstd
       - name: Build Moonstone CLI
         working-directory: .ci/moonstone
         run: |
@@ -52,5 +52,6 @@ jobs:
             ./tests/test_orbit_report.sh
             ./tests/test_orbit_integration.sh
             ./tests/test_publish_verification.sh
+            ./tests/test_registry_source_package.sh
           '
           moon run play

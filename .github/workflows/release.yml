@@ -27,7 +27,7 @@ jobs:
         with:
           repository: moonstone-sh/moonstone
           # Pinned to the current manifest, lockfile, and projected-environment contract.
-          ref: ad1ef8c03f8d6c32711dc35c9fd4aa1661cc4f07
+          ref: cb4151469f82b2843a2ad918ac8da55692674913
           path: .ci/moonstone
       - uses: mlugg/setup-zig@v2
         with:

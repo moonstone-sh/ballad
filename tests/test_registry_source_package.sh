@@ -56,6 +56,11 @@ return ballad.partiture(function(p)
     materialize = {
       type = "command",
       command = "zig build install-native",
+      external_paths = {
+        { dependency = "SQLITE", variable = "SQLITE_LIBDIR", kind = "library" },
+        { dependency = "SQLITE", variable = "SQLITE_INCDIR", kind = "include" },
+      },
+      ldflags = { "-L$(SQLITE_LIBDIR)" },
       collect = {
         lua_modules = {
           { name = "meteorite.lua", path = "src/app.lua" },
@@ -86,6 +91,23 @@ grep -q '\[artifacts.materialize\]' dist/registry/meteorite/package.toml || { ec
 grep -q 'type = "command"' dist/registry/meteorite/package.toml || { echo "FAIL: command materializer missing"; exit 1; }
 grep -q 'lua_modules' dist/registry/meteorite/package.toml || { echo "FAIL: lua_modules collect missing"; exit 1; }
 grep -q 'lua_cmodules' dist/registry/meteorite/package.toml || { echo "FAIL: lua_cmodules collect missing"; exit 1; }
+grep -q 'external_paths = ' dist/registry/meteorite/package.toml || { echo "FAIL: external path contract missing"; exit 1; }
+grep -q 'variable = "SQLITE_INCDIR"' dist/registry/meteorite/package.toml || { echo "FAIL: include path requirement missing"; exit 1; }
+grep -q 'variable = "SQLITE_LIBDIR"' dist/registry/meteorite/package.toml || { echo "FAIL: library path requirement missing"; exit 1; }
+grep -Fq 'ldflags = [ "-L$(SQLITE_LIBDIR)" ]' dist/registry/meteorite/package.toml || { echo "FAIL: external linker flag missing"; exit 1; }
+
+RECIPE_WITH_INCDIR=$(sed -n 's/^recipe_hash = "\([^"]*\)"$/\1/p' dist/registry/meteorite/package.toml)
+sed 's/SQLITE_INCDIR/SQLITE_HEADERS/g; s#dist/registry/meteorite#dist/registry/meteorite-headers#g' partiture.lua > partiture_external_variant.lua
+luajit "$BALLAD_ROOT/src/main.lua" play partiture_external_variant.lua > "$WORK_DIR/run-external-variant.log" 2>&1 || { cat "$WORK_DIR/run-external-variant.log"; exit 1; }
+RECIPE_WITH_HEADERS=$(sed -n 's/^recipe_hash = "\([^"]*\)"$/\1/p' dist/registry/meteorite-headers/package.toml)
+test "$RECIPE_WITH_INCDIR" != "$RECIPE_WITH_HEADERS" || { echo "FAIL: external path contract did not affect recipe identity"; exit 1; }
+
+sed 's/kind = "include"/kind = "root"/' partiture.lua > partiture_invalid_external.lua
+if luajit "$BALLAD_ROOT/src/main.lua" play partiture_invalid_external.lua > "$WORK_DIR/run-invalid-external.log" 2>&1; then
+  echo "FAIL: invalid external path kind was accepted"
+  exit 1
+fi
+grep -q 'kind must be include or library' "$WORK_DIR/run-invalid-external.log" || { cat "$WORK_DIR/run-invalid-external.log"; echo "FAIL: invalid external path diagnostic missing"; exit 1; }
 
 zstd -dc dist/registry/meteorite/meteorite-1.2.3-source.tar.zst | tar -tf - > "$WORK_DIR/tar-list.txt"
 grep -q '^./moonstone.toml$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: moonstone.toml not archived"; cat "$WORK_DIR/tar-list.txt"; exit 1; }

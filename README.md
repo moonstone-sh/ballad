@@ -347,6 +347,27 @@ local source_artifact = moonstone.registry.source_package(project, {
 p.sink.artifact(source_artifact, { out = "dist/registry/meteorite" })
 ```
 
+When the build genuinely depends on host-provided development files, declare
+that boundary in the materialization contract. Do not rely on an undocumented
+environment variable inside the build command:
+
+```lua
+materialize = {
+  type = "native_cmodule",
+  external_paths = {
+    { dependency = "SQLITE", variable = "SQLITE_INCDIR", kind = "include" },
+    { dependency = "SQLITE", variable = "SQLITE_LIBDIR", kind = "library" },
+  },
+  ldflags = { "-L$(SQLITE_LIBDIR)" },
+  -- input/output declarations omitted
+}
+```
+
+Ballad validates and canonicalizes these requirements and includes the complete
+materialization contract in the source-package recipe hash. Moonstone resolves
+the variables only when the final build environment exists. Prefer ordinary
+Moonstone build dependencies when they can provide the required files.
+
 ### Repository and Registry READMEs
 
 Keep `README.md` for people visiting the source repository: architecture,

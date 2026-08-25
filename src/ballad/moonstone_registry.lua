@@ -12,6 +12,25 @@
 ---@field origin? table immutable source provenance override ({ kind = "git", url = "https://...", revision? = "..." })
 ---@field out? string output directory path for the registry artifact
 
+---@class RegistryExternalPathRequirement
+---@field dependency string external development package identifier (for example "SQLITE")
+---@field variable string environment variable containing the host path
+---@field kind "include"|"library" required path category
+
+---@class RegistryMaterializeConfig
+---@field type? string materializer type (defaults to "command")
+---@field command? string command materializer executable or shell command
+---@field args? string[] ordered command arguments
+---@field steps? table[] ordered command steps
+---@field env? table<string, string> fixed build environment entries
+---@field external_paths? RegistryExternalPathRequirement[] host-provided paths resolved at materialization time
+---@field ldflags? string[] ordered linker flags; `$(VARIABLE)` path references use declared external paths
+---@field strategy? string materializer strategy
+---@field input? table materializer input declaration
+---@field output? table materializer output declaration
+---@field collect? table materialized output collection rules
+---@field cmake_args? string[] ordered CMake arguments
+
 ---@class RegistrySourcePackageOpts
 ---@field name? string package name (e.g. "user/meteorite")
 ---@field version? string package version string (e.g. "0.1.0")
@@ -22,7 +41,7 @@
 ---@field readme? string relative path to README file (defaults to REGISTRY_README.md, then README.md in project root)
 ---@field readme_content? string raw README markdown content string
 ---@field origin? table immutable source provenance override ({ kind = "git", url = "https://...", revision? = "..." })
----@field materialize? table materialization recipe spec (type = "command", command = "...", collect = {...})
+---@field materialize? RegistryMaterializeConfig materialization recipe and external-input contract
 ---@field out? string output directory path for the registry artifact
 
 ---@class RegistryExternalPackageOpts
@@ -231,6 +250,56 @@ local function append_toml_table(lines, header, values)
 		local child_header = inner and ("[" .. inner .. "." .. tostring(key) .. "]") or (header .. "." .. tostring(key))
 		append_toml_table(lines, child_header, values[key])
 	end
+end
+
+local function normalize_materialize(value, fail)
+	local materialize = {}
+	for key, item in pairs(value) do materialize[key] = item end
+	materialize.type = materialize.type or "command"
+
+	if materialize.external_paths ~= nil then
+		if type(materialize.external_paths) ~= "table" or not is_array(materialize.external_paths) then
+			fail("registry.source_package materialize.external_paths must be an array")
+		end
+		local paths = {}
+		local variables = {}
+		for index, requirement in ipairs(materialize.external_paths) do
+			if type(requirement) ~= "table" or type(requirement.dependency) ~= "string" or requirement.dependency == "" or type(requirement.variable) ~= "string" or requirement.variable == "" then
+				fail("registry.source_package materialize.external_paths[" .. tostring(index) .. "] requires dependency and variable strings")
+			end
+			if requirement.kind ~= "include" and requirement.kind ~= "library" then
+				fail("registry.source_package materialize.external_paths[" .. tostring(index) .. "].kind must be include or library")
+			end
+			if variables[requirement.variable] then
+				fail("registry.source_package materialize.external_paths contains duplicate variable " .. requirement.variable)
+			end
+			variables[requirement.variable] = true
+			paths[#paths + 1] = {
+				dependency = requirement.dependency,
+				variable = requirement.variable,
+				kind = requirement.kind,
+			}
+		end
+		table.sort(paths, function(left, right)
+			local left_key = left.variable .. "\0" .. left.dependency .. "\0" .. left.kind
+			local right_key = right.variable .. "\0" .. right.dependency .. "\0" .. right.kind
+			return left_key < right_key
+		end)
+		materialize.external_paths = paths
+	end
+
+	if materialize.ldflags ~= nil then
+		if type(materialize.ldflags) ~= "table" or not is_array(materialize.ldflags) then
+			fail("registry.source_package materialize.ldflags must be an array")
+		end
+		for index, flag in ipairs(materialize.ldflags) do
+			if type(flag) ~= "string" then
+				fail("registry.source_package materialize.ldflags[" .. tostring(index) .. "] must be a string")
+			end
+		end
+	end
+
+	return materialize
 end
 
 local function glob_to_pattern(glob)
@@ -606,6 +675,7 @@ registry.source_package = function(ctx, inputs, opts)
 	if not opts.name or opts.name == "" then ctx.fail("registry.source_package requires opts.name") end
 	if not opts.version or opts.version == "" then ctx.fail("registry.source_package requires opts.version") end
 	if type(opts.materialize) ~= "table" then ctx.fail("registry.source_package requires opts.materialize") end
+	local materialize = normalize_materialize(opts.materialize, function(message) ctx.fail(message) end)
 
 	if not process.command_ok("command -v zstd >/dev/null 2>&1") then
 		ctx.fail("registry.source_package requires zstd in PATH to create .tar.zst source archives")
@@ -668,7 +738,8 @@ registry.source_package = function(ctx, inputs, opts)
 		"kind=source-artifact",
 		"name=" .. package_name,
 		"version=" .. version,
-		"materializer=" .. tostring(opts.materialize.type or "command"),
+		"materializer=" .. tostring(materialize.type),
+		"materialize=" .. toml_inline_value(materialize),
 		"target=source",
 		"hash=" .. blob_hash,
 		"",
@@ -705,11 +776,6 @@ registry.source_package = function(ctx, inputs, opts)
 	}) do
 		table.insert(package_lines, line)
 	end
-	local materialize = {}
-	for key, value in pairs(opts.materialize) do
-		materialize[key] = value
-	end
-	materialize.type = materialize.type or "command"
 	append_toml_table(package_lines, "[artifacts.materialize]", materialize)
 	fs.write_file(path.join(out_dir, "package.toml"), table.concat(package_lines, "\n") .. "\n")
 	local readme_field = ""
