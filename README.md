@@ -1,5 +1,8 @@
 # Ballad
 
+> Documentation map: [`docs/README.md`](docs/README.md) · contributor guidance:
+> [`AGENTS.md`](AGENTS.md)
+
 Ballad exports Moonstone-managed Lua projects through a deterministic pipeline. A partiture declares explicit sources, plugin transforms, and sinks; Ballad core owns planning, execution, file materialization, file graphs, and artifacts.
 
 ## Usage
