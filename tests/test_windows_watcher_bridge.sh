@@ -24,7 +24,7 @@ process.cwd = function() return "C:/fixture" end
 process.capture_run = function(opts)
   calls[#calls + 1] = opts
   if opts.tool == "moon" then
-    assert(table.concat(opts.args, " ") == "tool resolve ballad-watch --json")
+    assert(table.concat(opts.args, " ") == "provision resolve ballad-watch --json")
     if resolver == "missing" then return { exit_code = 1, stdout = "", stderr = "tool provision unavailable offline" } end
     if resolver == "old" then return { exit_code = 0, stdout = '{"contract":"moonstone:tool-resolve:v0"}', stderr = "" } end
     return {
@@ -158,7 +158,7 @@ assert(expect_failure("legacy raw shell fields", function() end, function(spec)
   spec.options.cleanup = "also unsafe"
 end) == 0, "legacy shell must fail before helper resolution")
 
-assert(expect_failure("tool resolve ballad-watch --json", function() resolver = "missing" end, function() end) == 1)
+assert(expect_failure("moon provision resolve ballad-watch --json", function() resolver = "missing" end, function() end) == 1)
 assert(expect_failure("moonstone:tool-resolve:v1", function() resolver = "old" end, function() end) == 1)
 assert(expect_failure("missing or too old", function() helper = "old" end, function() end) == 2)
 assert(expect_failure("ballad:watcher-result:v1", function() helper = "ignores_manifest" end, function() end) == 2)

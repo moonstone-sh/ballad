@@ -416,10 +416,10 @@ end
 local function resolve_windows_helper(ctx)
   local result = process.capture_run({
     tool = configured_moonstone_bin(),
-    args = { "tool", "resolve", "ballad-watch", "--json" },
+    args = { "provision", "resolve", "ballad-watch", "--json" },
   })
   if result.exit_code ~= 0 then
-    ctx.fail("Windows watcher helper is unavailable: `moon tool resolve ballad-watch --json` failed"
+    ctx.fail("Windows watcher helper is unavailable: `moon provision resolve ballad-watch --json` failed"
       .. (result.stderr ~= "" and ("\n" .. result.stderr) or "")
       .. "\nProvision a Windows `ballad-watch` helper as a Moonstone helper dependency and run `moon sync`. "
       .. "Ballad requires helper protocol ballad:watcher:v1 and does not provision a substitute.")

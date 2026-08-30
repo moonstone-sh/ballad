@@ -452,7 +452,7 @@ smoke tests.
 On POSIX, Ballad generates the existing `sh` polling supervisor using `find`
 and `stat`. On Windows, it writes a deterministic `ballad:watcher:v1` manifest
 and resolves an already-provisioned `ballad-watch` helper through
-`moon tool resolve ballad-watch --json`. Windows watcher declarations must use
+`moon provision resolve ballad-watch --json`. Windows watcher declarations must use
 `run = p.task.native({ id = ..., tool = ..., args = ... })`; raw `before`,
 `effect`/`command`, and `options.cleanup` shell fields are rejected and never
 sent to `cmd.exe`. The helper is not bundled with this Ballad source package.

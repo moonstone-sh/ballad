@@ -25,7 +25,7 @@ Build output is local only; it is not a Moonstone provision.
 On Windows Ballad runs exactly:
 
 ```text
-moon tool resolve ballad-watch --json
+moon provision resolve ballad-watch --json
 ```
 
 The helper must be an already synchronized Moonstone `helper` provision named
