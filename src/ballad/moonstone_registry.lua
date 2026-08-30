@@ -42,7 +42,19 @@
 ---@field readme_content? string raw README markdown content string
 ---@field origin? table immutable source provenance override ({ kind = "git", url = "https://...", revision? = "..." })
 ---@field materialize? RegistryMaterializeConfig materialization recipe and external-input contract
+---@field format? "tar.gz"|"tar.zst" source archive format; defaults to the portable Moonstone-backed "tar.gz" route
+---@field moon? string path or name of the Moonstone CLI used for artifact creation
 ---@field out? string output directory path for the registry artifact
+
+---@class RegistryHelperPackageOpts
+---@field name string Moonstone package name (for example "moonstone/ballad-watch")
+---@field version string helper package version
+---@field target string native Windows target triple (for example "x86_64-windows-gnu")
+---@field executable string logical Moonstone bin provision name (for example "ballad-watch")
+---@field source_path? string explicit built executable path; otherwise exactly one input file is required
+---@field description? string package description
+---@field out? string output directory for package.toml and the canonical archive
+---@field moon? string Moonstone CLI implementing moonstone:artifact-create:v1
 
 ---@class RegistryExternalPackageOpts
 ---@field name? string package name (e.g. "moonstone/lua")
@@ -60,6 +72,7 @@ local fs = require("ballad.fs")
 local path = require("ballad.path")
 local process = require("ballad.process")
 local project_mod = require("ballad.project")
+local dkjson = require("dkjson")
 
 registry.name = "ballad.moonstone_registry"
 registry.version = "0.1.0"
@@ -68,6 +81,12 @@ local README_SIDECAR = "README.md"
 
 registry.methods = {
 	package = {
+		inputs = { "asset_set" },
+		outputs = { "asset_set" },
+		cacheable = false,
+		parallel_safe = true,
+	},
+	helper = {
 		inputs = { "asset_set" },
 		outputs = { "asset_set" },
 		cacheable = false,
@@ -401,12 +420,107 @@ local function write_tar_file_list(files, staging_dir, list_path)
 	fs.write_file(list_path, table.concat(lines, "\n") .. "\n")
 end
 
+local ARTIFACT_CREATE_CONTRACT = "moonstone:artifact-create:v1"
+
+local function configured_moon_cli(opts)
+	if opts and (opts.moon or opts.moon_bin) then return opts.moon or opts.moon_bin end
+	if os.getenv("MOONSTONE_CLI") and os.getenv("MOONSTONE_CLI") ~= "" then return os.getenv("MOONSTONE_CLI") end
+	if os.getenv("MOONSTONE_BIN") and os.getenv("MOONSTONE_BIN") ~= "" then return os.getenv("MOONSTONE_BIN") end
+	return "moon"
+end
+
+local function artifact_capability_failure(ctx, moon_bin, result, detail)
+	local suffix = detail or (result and result.stderr)
+	if suffix and suffix ~= "" then suffix = ": " .. suffix else suffix = "" end
+	ctx.fail("registry archive creation requires Moonstone artifact-create contract " .. ARTIFACT_CREATE_CONTRACT
+		.. " (`" .. tostring(moon_bin) .. " artifact create --json`). The configured Moonstone is unavailable or incompatible; upgrade to the first artifact-create milestone"
+		.. suffix)
+end
+
+local function artifact_create_failure(ctx, moon_bin, result)
+	local stderr = result.stderr or ""
+	local stdout = result.stdout or ""
+	local unavailable = result.exit_code == 127
+		or stderr:match("[Uu]nknown command")
+		or stderr:match("[Nn]ot found")
+		or stderr:match("[Uu]nrecognized")
+	if unavailable then artifact_capability_failure(ctx, moon_bin, result) end
+	ctx.fail("Moonstone artifact-create invocation failed: " .. tostring(moon_bin) .. " artifact create --json"
+		.. (stderr ~= "" and (": " .. stderr) or (stdout ~= "" and (": " .. stdout) or "")))
+end
+
+---Create a canonical tar.gz from the closure Ballad has already selected and staged.
+---Moonstone owns byte-level archive construction only; Ballad owns every entry
+---name, source, and portable mode supplied to this invocation.
+local function create_tar_gz(ctx, opts, tarball_path, entries)
+	if #entries == 0 then ctx.fail("registry archive selected no files") end
+	local moon_bin = configured_moon_cli(opts)
+	local args = { "artifact", "create", "--out", path.absolute(tarball_path), "--json", "--" }
+	for _, entry in ipairs(entries) do
+		args[#args + 1] = entry.virtual_path
+		args[#args + 1] = path.absolute(entry.source_path)
+		args[#args + 1] = entry.mode
+	end
+	local result = process.capture_run({ tool = moon_bin, args = args })
+	if result.exit_code ~= 0 then artifact_create_failure(ctx, moon_bin, result) end
+
+	local document, _, decode_error = dkjson.decode(result.stdout)
+	if type(document) ~= "table" then
+		artifact_capability_failure(ctx, moon_bin, result, "invalid JSON result: " .. tostring(decode_error))
+	end
+	local valid_b3 = type(document.b3) == "string" and #document.b3 == 67 and document.b3:match("^b3:[0-9a-f]+$")
+	if document.contract ~= ARTIFACT_CREATE_CONTRACT
+		or type(document.path) ~= "string"
+		or type(document.bytes) ~= "number" or document.bytes < 0 or document.bytes % 1 ~= 0
+		or not valid_b3 then
+		artifact_capability_failure(ctx, moon_bin, result, "unsupported result document")
+	end
+	return document
+end
+
+local function sort_archive_entries(ctx, entries)
+	local seen = {}
+	for _, entry in ipairs(entries) do
+		if not entry.virtual_path or entry.virtual_path == "" or seen[entry.virtual_path] then
+			ctx.fail("registry archive has duplicate or missing virtual path " .. tostring(entry.virtual_path))
+		end
+		seen[entry.virtual_path] = true
+		if not fs.is_file(entry.source_path) then
+			ctx.fail("registry archive entry is not a regular staged file: " .. tostring(entry.source_path))
+		end
+	end
+	table.sort(entries, function(left, right) return left.virtual_path < right.virtual_path end)
+	return entries
+end
+
+-- The artifact-create milestone has no raw hashing endpoint. Hash the canonical
+-- recipe representation through the same portable artifact contract instead of
+-- falling back to host b3sum on Windows.
+local function canonical_recipe_hash(ctx, opts, recipe_text, work_dir)
+	local recipe_path = path.join(work_dir, ".ballad-recipe-" .. tostring(ctx.node.id) .. ".txt")
+	local recipe_artifact = path.join(work_dir, ".ballad-recipe-" .. tostring(ctx.node.id) .. ".tar.gz")
+	fs.write_file(recipe_path, recipe_text)
+	local result = create_tar_gz(ctx, opts, recipe_artifact, {
+		{ virtual_path = "recipe", source_path = recipe_path, mode = "0644" },
+	})
+	os.remove(recipe_path)
+	os.remove(recipe_artifact)
+	return result.b3
+end
+
+local function require_posix_registry(ctx, operation)
+	if process.is_windows() then
+		ctx.fail(operation .. " is unavailable on Windows: Ballad's registry publisher requires POSIX tar, zstd, and publish.sh tooling")
+	end
+end
+
 ---Package a layout AssetSet into a publishable prebuilt registry artifact.
 ---@param ctx PluginCtx
 ---@param inputs AssetSet[] layout asset set input
 ---@param opts RegistryPackageOpts|table options specifying name, version, target, runtime, readme, readme_content, etc.
 ---@return AssetSet
 registry.package = function(ctx, inputs, opts)
+	opts = opts or {}
 	local files_asset = nil
 	for _, a in ipairs(inputs[1].assets) do
 		if a.kind == "files" then
@@ -451,22 +565,20 @@ registry.package = function(ctx, inputs, opts)
 	local tarball_name = local_name .. "-" .. version .. "-" .. target .. ".tar.gz"
 	local tarball_path = path.join(artifact_dir, tarball_name)
 	print("Creating registry artifact: " .. tarball_name)
-	local tar_cmd = string.format(
-		"tar --exclude=%s -czf %s -C %s .",
-		process.quote("./registry-artifact"),
-		process.quote(path.absolute(tarball_path)),
-		process.quote(path.absolute(out_dir))
-	)
-	if not process.command_ok(tar_cmd) then
-		error("failed to create tarball")
+	local entries = {}
+	for _, asset in ipairs(inputs[1].assets or {}) do
+		local is_project_metadata = asset.kind == "project" and asset.virtual_path == nil
+		if asset.kind ~= "files" and not is_project_metadata and asset.virtual_path and asset.virtual_path ~= "" then
+			entries[#entries + 1] = {
+				virtual_path = asset.virtual_path,
+				source_path = path.join(out_dir, asset.virtual_path),
+				mode = (asset.executable or (asset.metadata and asset.metadata.executable)) and "0755" or "0644",
+			}
+		end
 	end
-	local blob_hash = "b3:" .. process.b3sum(tarball_path)
-	local blob_bytes = 0
-	local f = io.open(tarball_path, "rb")
-	if f then
-		blob_bytes = f:seek("end")
-		f:close()
-	end
+	local artifact_result = create_tar_gz(ctx, opts, tarball_path, sort_archive_entries(ctx, entries))
+	local blob_hash = artifact_result.b3
+	local blob_bytes = artifact_result.bytes
 	local bin_name = meta.bin_name or meta.name or "app"
 	local libexec_root = meta.libexec_root or ""
 	local readme_content = resolve_readme_content(inputs, opts)
@@ -488,7 +600,7 @@ registry.package = function(ctx, inputs, opts)
 		"provides=" .. table.concat(provides_list, ","),
 		"",
 	}, "\n")
-	local recipe_hash = "b3:" .. process.b3sum_string(recipe_text)
+	local recipe_hash = canonical_recipe_hash(ctx, opts, recipe_text, artifact_dir)
 	local digest = blob_hash:sub(4)
 	local url = string.format("blobs/b3/%s/%s/%s.tar.gz", digest:sub(1, 2), digest:sub(3, 4), digest)
 	local runtime_field = ""
@@ -661,6 +773,117 @@ registry.package = function(ctx, inputs, opts)
 	return assets
 end
 
+-- Package one native executable as a Moonstone bin provision. The dependency
+-- role is intentionally not encoded in the artifact: the consumer chooses
+-- role = "helper", which creates Moonstone's isolated bin-helper scope.
+-- This creates release inputs only; it neither publishes nor contacts a registry.
+---@param ctx PluginCtx
+---@param inputs AssetSet[] exactly one generated or source executable asset
+---@param opts RegistryHelperPackageOpts
+---@return AssetSet
+registry.helper = function(ctx, inputs, opts)
+	opts = opts or {}
+	if type(opts.name) ~= "string" or opts.name == "" then ctx.fail("registry.helper requires opts.name") end
+	if type(opts.version) ~= "string" or opts.version == "" then ctx.fail("registry.helper requires opts.version") end
+	if type(opts.executable) ~= "string" or opts.executable == "" or opts.executable:find("[/\\]", 1) then
+		ctx.fail("registry.helper requires a logical opts.executable name, not a path")
+	end
+	if type(opts.target) ~= "string" or not opts.target:find("-windows-", 1, true) then
+		ctx.fail("registry.helper requires an explicit Windows target triple")
+	end
+
+	local source_path = opts.source_path
+	if source_path == nil then
+		local candidates = {}
+		for _, asset in ipairs((inputs[1] and inputs[1].assets) or {}) do
+			local candidate = asset.output_path or asset.source_path
+			if candidate and fs.is_file(candidate) then candidates[#candidates + 1] = candidate end
+		end
+		if #candidates ~= 1 then
+			ctx.fail("registry.helper requires exactly one executable input asset or opts.source_path")
+		end
+		source_path = candidates[1]
+	end
+	if type(source_path) ~= "string" or not fs.is_file(source_path) then
+		ctx.fail("registry.helper executable is not a regular file: " .. tostring(source_path))
+	end
+	if not source_path:lower():match("%.exe$") then
+		ctx.fail("registry.helper Windows executable must end in .exe")
+	end
+
+	local out_dir = opts.out or path.join(".ballad/tmp/registry-helper-" .. tostring(ctx.node.id), "registry-artifact")
+	local work_dir = path.join(path.dirname(out_dir), ".registry-helper-work-" .. tostring(ctx.node.id))
+	local staged_path = path.join(work_dir, "payload", "bin", opts.executable .. ".exe")
+	fs.remove_tree(out_dir)
+	fs.remove_tree(work_dir)
+	fs.mkdir(path.dirname(staged_path))
+	fs.mkdir(out_dir)
+	fs.copy_file(source_path, staged_path)
+	fs.chmod(staged_path, "+x")
+
+	local local_name = opts.name:match("/([^/]+)$") or opts.name
+	local tarball_name = local_name .. "-" .. opts.version .. "-" .. opts.target .. ".tar.gz"
+	local tarball_path = path.join(out_dir, tarball_name)
+	local artifact_result = create_tar_gz(ctx, opts, tarball_path, {
+		{ virtual_path = "bin/" .. opts.executable .. ".exe", source_path = staged_path, mode = "0755" },
+	})
+	local recipe_text = table.concat({
+		"schema=moonstone.recipe.v0",
+		"kind=helper-artifact",
+		"name=" .. opts.name,
+		"version=" .. opts.version,
+		"materializer=archive",
+		"target=" .. opts.target,
+		"provides=bin:" .. opts.executable .. ":bin/" .. opts.executable .. ".exe",
+		"",
+	}, "\n")
+	local recipe_hash = canonical_recipe_hash(ctx, opts, recipe_text, work_dir)
+	local digest = artifact_result.b3:sub(4)
+	local url = string.format("blobs/b3/%s/%s/%s.tar.gz", digest:sub(1, 2), digest:sub(3, 4), digest)
+	local descriptor = table.concat({
+		"[package]",
+		"name = " .. toml_quote(opts.name),
+		"version = " .. toml_quote(opts.version),
+		"kind = \"bin\"",
+		"description = " .. toml_quote(opts.description or ("Moonstone helper " .. opts.executable)),
+		"",
+		"[[artifacts]]",
+		"id = " .. toml_quote("helper-" .. opts.target),
+		"kind = \"bin\"",
+		"target = " .. toml_quote(opts.target),
+		"format = \"tar.gz\"",
+		"url = " .. toml_quote(url),
+		"hash = " .. toml_quote(artifact_result.b3),
+		"recipe_hash = " .. toml_quote(recipe_hash),
+		"bytes = " .. tostring(artifact_result.bytes),
+		"",
+		"[artifacts.materialize]",
+		"type = \"archive\"",
+		"strip_components = 0",
+		"",
+		"[[artifacts.provides]]",
+		"kind = \"bin\"",
+		"name = " .. toml_quote(opts.executable),
+		"path = " .. toml_quote("bin/" .. opts.executable .. ".exe"),
+		"",
+	}, "\n")
+	local descriptor_path = path.join(out_dir, "package.toml")
+	fs.write_file(descriptor_path, descriptor)
+
+	local assets = graph.AssetSet.new()
+	assets:add(ctx.graph:add_asset({
+		kind = "registry",
+		virtual_path = out_dir,
+		output_path = out_dir,
+		generated = true,
+		metadata = {
+			kind = "helper", name = opts.name, version = opts.version, target = opts.target,
+			executable = opts.executable, tarball = tarball_path, package_toml = descriptor_path,
+		},
+	}))
+	return assets
+end
+
 ---Package a Moonstone project into a publishable source archive artifact.
 ---@param ctx PluginCtx
 ---@param inputs AssetSet[] moonstone.project asset set input
@@ -677,8 +900,16 @@ registry.source_package = function(ctx, inputs, opts)
 	if type(opts.materialize) ~= "table" then ctx.fail("registry.source_package requires opts.materialize") end
 	local materialize = normalize_materialize(opts.materialize, function(message) ctx.fail(message) end)
 
-	if not process.command_ok("command -v zstd >/dev/null 2>&1") then
-		ctx.fail("registry.source_package requires zstd in PATH to create .tar.zst source archives")
+	local archive_format = opts.format or opts.archive_format or "tar.gz"
+	if archive_format ~= "tar.gz" and archive_format ~= "tar.zst" then
+		ctx.fail("registry.source_package format must be tar.gz or tar.zst")
+	end
+	if archive_format == "tar.zst" and process.is_windows() then
+		ctx.fail("registry.source_package format=tar.zst is unsupported by Moonstone artifact-create contract " .. ARTIFACT_CREATE_CONTRACT
+			.. " (it produces tar.gz only); the retained tar.zst path requires POSIX tar, zstd, and b3sum. Use format = \"tar.gz\" on Windows")
+	end
+	if archive_format == "tar.zst" and not process.command_ok("command -v zstd >/dev/null 2>&1") then
+		ctx.fail("registry.source_package format=tar.zst requires zstd in PATH; use format = \"tar.gz\" for Moonstone artifact-create")
 	end
 
 	local package_name = opts.name
@@ -693,7 +924,7 @@ registry.source_package = function(ctx, inputs, opts)
 	local staging_dir = path.join(work_dir, "payload")
 	local list_path = path.join(work_dir, "sources.list")
 	local uncompressed_tar_path = path.join(work_dir, "source.tar")
-	local tarball_name = local_name .. "-" .. version .. "-source.tar.zst"
+	local tarball_name = local_name .. "-" .. version .. "-source." .. archive_format
 	local tarball_path = path.join(out_dir, tarball_name)
 
 	local files = selected_source_files(ctx, input_set, opts)
@@ -705,33 +936,36 @@ registry.source_package = function(ctx, inputs, opts)
 	end
 	fs.mkdir(out_dir)
 	copy_source_files(files, staging_dir)
-	write_tar_file_list(files, staging_dir, list_path)
 
 	print("Creating source registry artifact: " .. tarball_name)
-	local tar_cmd = string.format(
-		"tar -cf %s -C %s -T %s",
-		process.quote(path.absolute(uncompressed_tar_path)),
-		process.quote(path.absolute(staging_dir)),
-		process.quote(path.absolute(list_path))
-	)
-	if not process.command_ok(tar_cmd) then
-		ctx.fail("registry.source_package failed to create intermediate source tar")
+	local entries = {}
+	for _, asset in ipairs(files) do
+		local rel = asset.virtual_path or asset.source_path or asset.output_path or asset.id
+		entries[#entries + 1] = {
+			virtual_path = rel,
+			source_path = path.join(staging_dir, rel),
+			mode = (asset.executable or (asset.metadata and asset.metadata.executable)) and "0755" or "0644",
+		}
 	end
-	local zstd_cmd = string.format(
-		"zstd -q -T0 -19 -f -o %s %s",
-		process.quote(path.absolute(tarball_path)),
-		process.quote(path.absolute(uncompressed_tar_path))
-	)
-	if not process.command_ok(zstd_cmd) then
-		ctx.fail("registry.source_package failed to create " .. tarball_name)
-	end
-
-	local blob_hash = "b3:" .. process.b3sum(tarball_path)
-	local blob_bytes = 0
-	local handle = io.open(tarball_path, "rb")
-	if handle then
-		blob_bytes = handle:seek("end") or 0
-		handle:close()
+	local blob_hash, blob_bytes
+	if archive_format == "tar.gz" then
+		local artifact_result = create_tar_gz(ctx, opts, tarball_path, sort_archive_entries(ctx, entries))
+		blob_hash, blob_bytes = artifact_result.b3, artifact_result.bytes
+	else
+		write_tar_file_list(files, staging_dir, list_path)
+		local tar_cmd = string.format(
+			"tar -cf %s -C %s -T %s",
+			process.quote(path.absolute(uncompressed_tar_path)),
+			process.quote(path.absolute(staging_dir)),
+			process.quote(path.absolute(list_path))
+		)
+		if not process.command_ok(tar_cmd) then ctx.fail("registry.source_package failed to create intermediate source tar") end
+		local zstd_cmd = string.format("zstd -q -T0 -19 -f -o %s %s", process.quote(path.absolute(tarball_path)), process.quote(path.absolute(uncompressed_tar_path)))
+		if not process.command_ok(zstd_cmd) then ctx.fail("registry.source_package failed to create " .. tarball_name) end
+		blob_hash = "b3:" .. process.b3sum(tarball_path)
+		local handle = io.open(tarball_path, "rb")
+		blob_bytes = handle and handle:seek("end") or 0
+		if handle then handle:close() end
 	end
 	local recipe_text = table.concat({
 		"schema=moonstone.recipe.v0",
@@ -744,9 +978,11 @@ registry.source_package = function(ctx, inputs, opts)
 		"hash=" .. blob_hash,
 		"",
 	}, "\n")
-	local recipe_hash = "b3:" .. process.b3sum_string(recipe_text)
+	local recipe_hash = archive_format == "tar.gz"
+		and canonical_recipe_hash(ctx, opts, recipe_text, work_dir)
+		or ("b3:" .. process.b3sum_string(recipe_text))
 	local digest = blob_hash:sub(4)
-	local url = string.format("blobs/b3/%s/%s/%s.tar.zst", digest:sub(1, 2), digest:sub(3, 4), digest)
+	local url = string.format("blobs/b3/%s/%s/%s.%s", digest:sub(1, 2), digest:sub(3, 4), digest, archive_format)
 
 	local readme_content = resolve_readme_content(inputs, opts)
 	local origin = resolve_origin(inputs, opts)
@@ -767,7 +1003,7 @@ registry.source_package = function(ctx, inputs, opts)
 		'id = "source"',
 		'kind = "source"',
 		'target = "source"',
-		'format = "tar.zst"',
+		'format = "' .. archive_format .. '"',
 		'url = "' .. url .. '"',
 		'hash = "' .. blob_hash .. '"',
 		'recipe_hash = "' .. recipe_hash .. '"',
@@ -837,11 +1073,14 @@ local function infer_runtime_lua_abi(name, version, explicit)
 	return "lua54"
 end
 
-local function runtime_bin_provides(name, opts)
+local function runtime_bin_provides(name, opts, target)
 	if opts.bins then return opts.bins end
-	if name == "love" then return { love = "bin/love" } end
-	if name == "luajit" then return { lua = "bin/luajit", luajit = "bin/luajit" } end
-	return { lua = "bin/lua", luac = "bin/luac" }
+	local suffix = tostring(target):find("windows", 1, true) and ".exe" or ""
+	if name == "love" then return { love = "bin/love" .. suffix } end
+	if name == "luajit" then
+		return { lua = "bin/lua" .. suffix, luajit = "bin/luajit" .. suffix }
+	end
+	return { lua = "bin/lua" .. suffix, luac = "bin/luac" .. suffix }
 end
 
 local function artifact_target_from_path(artifact, name, version)
@@ -872,6 +1111,8 @@ local function default_runtime_source_archive(name, version, artifacts_dir)
 end
 
 registry.runtime = function(ctx, inputs, opts)
+	require_posix_registry(ctx, "registry.runtime")
+	opts = opts or {}
 	local name = opts.name or os.getenv("RUNTIME_NAME") or "lua"
 	local package_name = opts.package_name or os.getenv("RUNTIME_PACKAGE_NAME") or name
 	local version = opts.version or os.getenv("RUNTIME_VERSION")
@@ -883,7 +1124,6 @@ registry.runtime = function(ctx, inputs, opts)
 	local publish_now = opts.publish == true or opts.publish == "true" or os.getenv("RUNTIME_PUBLISH") == "1"
 	local lua_abi = infer_runtime_lua_abi(name, version, opts.lua_abi or os.getenv("RUNTIME_LUA_ABI"))
 	local lua_api = opts.lua_api or os.getenv("RUNTIME_LUA_API") or lua_abi
-	local bins = runtime_bin_provides(name, opts)
 	local source_archive = opts.source_archive or opts.source or os.getenv("RUNTIME_SOURCE_ARCHIVE") or default_runtime_source_archive(name, version, artifacts_dir)
 	local source_kind = opts.source_kind or os.getenv("RUNTIME_SOURCE_KIND") or (name == "lua" and "puc_lua_source" or (name == "luajit" and "luajit_source" or "runtime_source"))
 	local source_format = opts.source_format or os.getenv("RUNTIME_SOURCE_FORMAT") or "tar.gz"
@@ -918,6 +1158,7 @@ registry.runtime = function(ctx, inputs, opts)
 	for artifact in pipe:lines() do
 		local target = artifact_target_from_path(artifact, name, version)
 		if target then
+			local bins = runtime_bin_provides(name, opts, target)
 			local blob_hash = fs.read_file(artifact .. ".blob.hash")
 			if blob_hash then blob_hash = blob_hash:match("^%s*(.-)%s*$") end
 			if not blob_hash or blob_hash == "" then blob_hash = "b3:" .. process.b3sum(artifact) end
@@ -1000,6 +1241,9 @@ registry.runtime = function(ctx, inputs, opts)
 		end
 		if source_archive and source_archive ~= "" then
 			curl_cmd = curl_cmd .. " -F blob=@" .. process.quote(source_archive)
+		end
+		if readme_content then
+			curl_cmd = curl_cmd .. " -F readme=@" .. process.quote(path.join(out_dir, README_SIDECAR))
 		end
 		curl_cmd = curl_cmd .. " " .. process.quote(registry_url)
 		if not process.command_ok(curl_cmd) then ctx.fail("registry.runtime publish failed") end

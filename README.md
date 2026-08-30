@@ -219,6 +219,33 @@ p.sink.directory(app, { out = "dist/meteorite", file_graph = true })
 
 For Lua+Zig projects, run the Zig build as a native task before the sink or registry artifact so compiled Lua C modules exist in `.moonstone/env/lib/lua/<abi>/` and are copied into `libexec/<name>/lib/`.
 
+### Windows exports
+
+Core directory exports retain forward-slash virtual paths and deterministic file
+graphs on every host. Runnable `layout.libexec`, application `layout.exec`,
+tool `layout.exec`, and runnable `layout.flat` outputs include a sibling `.cmd`
+launcher for PowerShell and `cmd.exe`; keep using the extensionless launcher on
+POSIX. The Windows launchers prefer a bundled `bin/lua.exe` or
+`bin/luajit.exe`, then `BALLAD_LUA`, then the configured interpreter.
+
+Use structured native tasks on Windows:
+
+```lua
+p:native_task({ tool = "tool.exe", args = { "--out", "dist/result" }, cwd = "." })
+```
+
+Ballad runs those tasks with a child-local working directory and environment.
+Lua 5.1/LuaJIT has no portable `CreateProcessW` binding, so values containing
+`cmd.exe` metacharacters (including quotes, `%`, `&`, and `|`) are rejected
+instead of allowing command interpretation; use a helper file for that
+boundary. `cmd` shell strings and background native tasks are not Windows
+features. Watchers use a separately provisioned native helper described below.
+With `--jobs > 1`, native tasks run sequentially on Windows rather than being
+backgrounded.
+
+Ballad's CI validates Windows path and launcher serialization, not execution on
+a native Windows runner.
+
 ## Executable Tool Export
 
 `moonstone.tool` introduces a synchronized Moonstone executable scope as graph
@@ -422,6 +449,17 @@ mean “rerun when this source changes.”
 Use `options = { once = true }` for an inspectable, non-daemon refresh in CI or
 smoke tests.
 
+On POSIX, Ballad generates the existing `sh` polling supervisor using `find`
+and `stat`. On Windows, it writes a deterministic `ballad:watcher:v1` manifest
+and resolves an already-provisioned `ballad-watch` helper through
+`moon tool resolve ballad-watch --json`. Windows watcher declarations must use
+`run = p.task.native({ id = ..., tool = ..., args = ... })`; raw `before`,
+`effect`/`command`, and `options.cleanup` shell fields are rejected and never
+sent to `cmd.exe`. The helper is not bundled with this Ballad source package.
+Add a compatible Moonstone **helper** provision and run `moon sync`; see
+[docs/WINDOWS_WATCHER_HELPER.md](docs/WINDOWS_WATCHER_HELPER.md) for the exact
+protocol.
+
 ## LÖVE Example
 
 ```lua
@@ -525,4 +563,16 @@ pointer. Ballad writes the selected Markdown into that sidecar and uploads it
 separately through the registry protocol, so a package descriptor never embeds
 a large user-facing document.
 
-The source archive is emitted as `name-version-source.tar.zst`; `zstd` must be available in `PATH`.
+Registry `package` artifacts and source packages default to `tar.gz`. Ballad selects
+and stages the closure, entry names, and portable `0644`/`0755` modes, then calls
+Moonstone's versioned `moon artifact create --json` contract for canonical archive
+bytes, digest, and size. This route does not require host `tar`, `zstd`, or
+`b3sum`, including on Windows. Set `moon = "/path/to/moon"` when the CLI is not
+on `PATH`; an older or missing CLI produces a diagnostic naming required contract
+`moonstone:artifact-create:v1`.
+
+`format = "tar.zst"` remains a POSIX-only legacy source-package route for
+existing consumers. It requires `tar`, `zstd`, and `b3sum`; Moonstone's first
+artifact-create milestone does not produce tar.zst, so Ballad rejects that format
+on Windows with an explicit diagnostic. Ballad still only emits a `publish.sh`
+helper and descriptor; registry publication remains outside this export step.

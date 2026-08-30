@@ -288,6 +288,9 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
         end
         return self:registry_source_package(project, opts)
       end,
+      helper = function(...)
+        return self:registry_helper(...)
+      end,
       runtime = function(...)
         return self:registry_runtime(...)
       end,
@@ -809,26 +812,7 @@ end
 ---@param tool string
 ---@return string|nil normalized path or nil if not found
 local function resolve_tool(tool)
-  if tool:sub(1, 1) == "/" or tool:sub(1, 2) == "./" then
-    return tool
-  end
-  if tool:find(":") then
-    error(
-      "Moonstone-provisioned native helpers are not implemented yet.\n" ..
-      "Tool: " .. tool .. "\n" ..
-      "Use a system tool name or absolute path for now."
-    )
-  end
-  -- Try which
-  local pipe = io.popen("command -v " .. require("ballad.process").quote(tool) .. " 2>/dev/null")
-  if pipe then
-    local resolved = pipe:read("*l")
-    pipe:close()
-    if resolved and resolved ~= "" then
-      return resolved
-    end
-  end
-  return nil
+  return require("ballad.native_runner").find_tool(tool)
 end
 
 ---@class NativeTaskOpts
@@ -875,8 +859,12 @@ function PipelineContext:native_task(opts)
   end
 
   -- Deferred parallel execution
-  if self._jobs > 1 and parallel_safe then
+  if self._jobs > 1 and parallel_safe and not require("ballad.process").is_windows() then
     return self:_native_task_deferred(opts, cache_key)
+  end
+  if self._jobs > 1 and parallel_safe and not self._windows_parallel_warning then
+    self._windows_parallel_warning = true
+    self:warn("Windows native tasks run sequentially: standard Lua has no portable background-process API")
   end
 
   -- Resolve tool
@@ -939,77 +927,16 @@ function PipelineContext:native_task(opts)
     end
   end
 
-  -- Build command
-  local cmd
-  if cmd_opt then
-    local first_token = cmd_opt:match("^%S+")
-    if first_token and (first_token == tool or first_token == require("ballad.process").quote(tool) or first_token == resolved_tool or first_token == require("ballad.process").quote(resolved_tool)) then
-      cmd = require("ballad.process").quote(resolved_tool) .. cmd_opt:sub(#first_token + 1)
-    else
-      cmd = require("ballad.process").quote(resolved_tool) .. " " .. cmd_opt
-    end
-  else
-    local cmd_parts = { resolved_tool }
-    for _, a in ipairs(args) do
-      table.insert(cmd_parts, require("ballad.process").quote(a))
-    end
-    cmd = table.concat(cmd_parts, " ")
-  end
-
-  -- Build env prefix if needed
-  local env_prefix = ""
-  for k, v in pairs(env) do
-    env_prefix = env_prefix .. k .. "=" .. require("ballad.process").quote(v) .. " "
-  end
-  if env_prefix ~= "" then
-    cmd = env_prefix .. cmd
-  end
-
-  -- Capture stdout/stderr via temp files for reliability
-  local tmp_stdout = os.tmpname()
-  local tmp_stderr = os.tmpname()
-  local full_cmd = string.format("cd %s && %s > %s 2> %s", require("ballad.process").quote(cwd), cmd, tmp_stdout, tmp_stderr)
-
-  -- Run
-  local status = os.execute(full_cmd)
-  local exit_code = 0
-  local ok = false
-  if type(status) == "number" then
-    exit_code = status
-    ok = (status == 0)
-  elseif status == true then
-    ok = true
-    exit_code = 0
-  elseif status == nil then
-    ok = false
-    exit_code = 1
-  end
-
-  -- Read stdout/stderr
-  local stdout_text = ""
-  local stderr_text = ""
-  local out_f = io.open(tmp_stdout, "r")
-  if out_f then
-    stdout_text = out_f:read("*a") or ""
-    out_f:close()
-  end
-  local err_f = io.open(tmp_stderr, "r")
-  if err_f then
-    stderr_text = err_f:read("*a") or ""
-    err_f:close()
-  end
-  os.remove(tmp_stdout)
-  os.remove(tmp_stderr)
-
-  -- Verify outputs
-  local missing_outputs = {}
-  if ok then
-    for _, out in ipairs(outputs) do
-      if not fs.read_file(out) and not fs.is_dir(out) then
-        table.insert(missing_outputs, out)
-      end
-    end
-  end
+  -- native_runner is the sole subprocess boundary. Structured { tool, args,
+  -- cwd, env } tasks work on both platforms; legacy cmd strings are diagnosed
+  -- rather than silently interpreted as cmd.exe syntax on Windows.
+  local native_result = require("ballad.native_runner").run(opts)
+  local cmd = native_result.cmd or cmd_opt or tool
+  local exit_code = native_result.exit_code
+  local ok = exit_code == 0
+  local stdout_text = native_result.stdout or ""
+  local stderr_text = native_result.stderr or ""
+  local missing_outputs = native_result.missing_outputs or {}
 
   -- Record task in graph
   local task = {
@@ -1567,11 +1494,7 @@ local function core_handler(plugin, method)
         local out = opts.out or source
         if out ~= source then
           if fs.is_dir(source) then
-            fs.remove_tree(out)
-            fs.mkdir(path.dirname(out))
-            if not process.command_ok("cp -R " .. process.quote(source) .. " " .. process.quote(out)) then
-              process.fail("cannot copy artifact " .. source .. " to " .. out)
-            end
+            fs.copy_tree(source, out)
           else
             fs.copy_file(source, out)
           end

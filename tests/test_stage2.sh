@@ -25,6 +25,8 @@ if tar -tzf "$PACKAGE_ARCHIVE" | grep -Eq '^\./libexec/ballad/(\.ci|docs|fixture
   echo "FAIL: registry artifact contains non-runtime project files"
   exit 1
 fi
+tar -tvzf "$PACKAGE_ARCHIVE" | grep -q '^-rwxr-xr-x.* bin/ballad$' || { echo "FAIL: registry archive lost Ballad's executable mode"; exit 1; }
+tar -tvzf "$PACKAGE_ARCHIVE" | grep -q '^-rw-r--r--.* libexec/ballad/src/main.lua$' || { echo "FAIL: registry archive lost Ballad's regular-file mode"; exit 1; }
 echo "PASS: version matches moonstone.toml"
 
 echo ""
@@ -58,6 +60,7 @@ return ballad.partiture(function(p)
   local app = layout.flat(project, {
     name = "ballad",
     entry = "src/main.lua",
+    include = { "src/**" },
   })
   local registry_artifact = moonstone.registry.package(app, {
     name = project.registry_name or "moonstone/ballad",
@@ -81,6 +84,8 @@ luajit src/main.lua play /tmp/test_flat.lua > /tmp/flat_test.log 2>&1
 test -f dist/flat-root/src/main.lua || { echo "FAIL: dist/flat-root/src/main.lua missing"; cat /tmp/flat_test.log; exit 1; }
 test -d dist/flat-root/lua || { echo "FAIL: dist/flat-root/lua missing"; cat /tmp/flat_test.log; exit 1; }
 ! test -f dist/flat-root/bin/ballad || { echo "FAIL: flat layout should not create launcher"; exit 1; }
+test -f dist/flat-root/run.cmd || { echo "FAIL: flat Windows launcher missing"; exit 1; }
+grep -q '%ROOT%\\src\\main.lua' dist/flat-root/run.cmd || { echo "FAIL: flat Windows launcher entry missing"; exit 1; }
 cat dist/flat-root/file-graph.json | jq -e '.layout == "flat"' > /dev/null || { echo "FAIL: file-graph layout is not flat"; exit 1; }
 cat dist/flat-root/file-graph.json | jq -e '.files[] | select(.dest == "src/main.lua")' > /dev/null || { echo "FAIL: src/main.lua missing from file-graph"; exit 1; }
 cat dist/flat-root/file-graph.json | jq -e '.files[] | select(.dest | startswith("lua/"))' > /dev/null || { echo "FAIL: lua modules missing from file-graph"; exit 1; }

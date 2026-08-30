@@ -79,9 +79,9 @@ end
 local function runtime_bin_map(files_root)
   local bin = {}
   for _, name in ipairs({ "lua", "luac", "luajit" }) do
-    if process.command_ok("test -f " .. process.quote(path.join(files_root, "bin", name))) then
+    if fs.is_file(path.join(files_root, "bin", name)) then
       bin[name] = path.join("files/bin", name)
-    elseif process.command_ok("test -f " .. process.quote(path.join(files_root, "bin", name .. ".exe"))) then
+    elseif fs.is_file(path.join(files_root, "bin", name .. ".exe")) then
       bin[name] = path.join("files/bin", name .. ".exe")
     end
   end
@@ -100,11 +100,19 @@ local function runtime_from_dependencies(root, env_rt)
 end
 
 local function query_current_runtime(root, moon_bin)
-  local cmd = "cd " .. process.quote(root) .. " && " .. process.quote(moon_bin or "moon") .. " interpreter path --current --json 2>/dev/null"
-  local output = process.capture(cmd)
+  local result = process.capture_run({
+    tool = moon_bin or "moon",
+    args = { "interpreter", "path", "--current", "--json" },
+    cwd = root,
+  })
+  local output = result.exit_code == 0 and result.stdout or ""
   if output == "" then
-    cmd = "cd " .. process.quote(root) .. " && " .. process.quote(moon_bin or "moon") .. " runtime path --current --json 2>/dev/null"
-    output = process.capture(cmd)
+    result = process.capture_run({
+      tool = moon_bin or "moon",
+      args = { "runtime", "path", "--current", "--json" },
+      cwd = root,
+    })
+    output = result.exit_code == 0 and result.stdout or ""
   end
   if output == "" then return nil end
   local decoded = dkjson.decode(output)
@@ -114,8 +122,11 @@ end
 
 local function query_runtime_artifact(moon_bin, artifact_hash)
   if not artifact_hash or artifact_hash == "" then return nil end
-  local cmd = process.quote(moon_bin or "moon") .. " store query --by-artifact-hash " .. process.quote(artifact_hash) .. " --json"
-  local output = process.capture(cmd)
+  local result = process.capture_run({
+    tool = moon_bin or "moon",
+    args = { "store", "query", "--by-artifact-hash", artifact_hash, "--json" },
+  })
+  local output = result.exit_code == 0 and result.stdout or ""
   if output == "" then return nil end
   local decoded = dkjson.decode(output)
   if type(decoded) ~= "table" or type(decoded[1]) ~= "table" then return nil end
@@ -169,17 +180,8 @@ local function find_moon_cli(opts)
     return os.getenv("MOONSTONE_BIN")
   end
 
-  local pipe = io.popen("which -a moon 2>/dev/null")
-  if pipe then
-    for line in pipe:lines() do
-      local trimmed = line:match("^%s*(.-)%s*$")
-      if trimmed ~= "" and not trimmed:find("%.moonstone/env/bin") and not trimmed:find("moonscript") then
-        pipe:close()
-        return trimmed
-      end
-    end
-    pipe:close()
-  end
+  local found = process.find_tool("moon")
+  if found and not found:find("%.moonstone/env/bin") and not found:find("moonscript") then return found end
 
   return "moon"
 end
@@ -487,6 +489,12 @@ return {
       parallel_safe = true,
     },
     registry_source_package = {
+      inputs = { "asset_set" },
+      outputs = { "asset_set" },
+      cacheable = false,
+      parallel_safe = true,
+    },
+    registry_helper = {
       inputs = { "asset_set" },
       outputs = { "asset_set" },
       cacheable = false,
@@ -801,6 +809,10 @@ return {
 
   registry_source_package = function(ctx, inputs, opts)
     return moonstone_registry.source_package(ctx, inputs, opts)
+  end,
+
+  registry_helper = function(ctx, inputs, opts)
+    return moonstone_registry.helper(ctx, inputs, opts)
   end,
 
   registry_runtime = function(ctx, inputs, opts)

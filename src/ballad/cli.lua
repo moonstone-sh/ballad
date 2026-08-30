@@ -116,8 +116,9 @@ local function write_report(report_path, partiture_file, results, pipeline, invo
     controls = pipeline._graph.metadata.controls or {},
     sinks = sinks,
   }) .. "\n")
-  if not process.command_ok("mv " .. process.quote(temporary) .. " " .. process.quote(report_path)) then
-    process.fail("cannot finalize Ballad report at " .. report_path)
+  local replaced, replace_err = fs.replace_file(temporary, report_path)
+  if not replaced then
+    process.fail("cannot finalize Ballad report at " .. report_path .. ": " .. tostring(replace_err))
   end
 end
 

@@ -43,6 +43,8 @@ jobs:
           moon exec sh -c '
             set -eu
             ./tests/test_layout_exec.sh
+            ./tests/test_windows_portability.sh
+            ./tests/test_windows_watcher_bridge.sh
             ./tests/test_native_closure.sh
             BALLAD_ROOT="$GITHUB_WORKSPACE" .ci/ballad-ci/tests/test_stage2.sh
             ./tests/test_watcher.sh
@@ -54,7 +56,9 @@ jobs:
             ./tests/test_moonstone_contract.sh
             ./tests/test_orbit_report.sh
             ./tests/test_orbit_integration.sh
-            ./tests/test_publish_verification.sh
-            ./tests/test_registry_source_package.sh
+             ./tests/test_publish_verification.sh
+             ./tests/test_registry_artifact_create.sh
+             ./tests/test_registry_source_package.sh
+            ./tests/test_runtime_registry.sh
           '
           moon run play

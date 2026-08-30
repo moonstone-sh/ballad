@@ -20,17 +20,8 @@ local fs = require("ballad.fs")
 ---@param tool string tool name or path
 ---@return string|nil resolved path or nil if not found
 function native_runner.find_tool(tool)
-  if path.is_absolute(tool) then
-    return tool
-  end
-  if tool:find(":") then
-    error("Moonstone-provisioned native helpers are not implemented yet: " .. tool)
-  end
-  local found = process.capture("which " .. process.quote(tool) .. " 2>/dev/null")
-  if found == "" then
-    return nil
-  end
-  return found
+  if path.is_absolute(tool) then return tool end
+  return process.find_tool(tool)
 end
 
 function native_runner.run(opts)
@@ -39,6 +30,20 @@ function native_runner.run(opts)
   local cmd_opt = opts.cmd
   local outputs = opts.outputs or {}
   if not tool then error("native_task: missing tool or cmd") end
+
+  if cmd_opt and process.is_windows() then
+    return {
+      ok = false,
+      unsupported = true,
+      missing_tool = false,
+      tool = tool,
+      description = opts.description or cmd_opt or "native task",
+      exit_code = -1,
+      stdout = "",
+      stderr = "native task cmd strings are POSIX-shell-only on Windows; use tool plus args, cwd, and env instead",
+      missing_outputs = outputs,
+    }
+  end
 
   local tool_path = native_runner.find_tool(tool)
   if not tool_path then
@@ -65,12 +70,6 @@ function native_runner.run(opts)
     else
       cmd = process.quote(tool_path) .. " " .. cmd_opt
     end
-  else
-    local cmd_parts = {process.quote(tool_path)}
-    for _, arg in ipairs(args) do
-      table.insert(cmd_parts, process.quote(arg))
-    end
-    cmd = table.concat(cmd_parts, " ")
   end
 
   if not fs.is_dir(cwd) then
@@ -90,25 +89,29 @@ function native_runner.run(opts)
   local stderr_text = ""
   local exit_code = 0
 
-  local env_prefix = ""
-  for key, value in pairs(opts.env or {}) do
-    env_prefix = env_prefix .. key .. "=" .. process.quote(value) .. " "
-  end
-  cmd = env_prefix .. cmd
-
   local stdout_file = os.tmpname()
   local stderr_file = os.tmpname()
-  local exit_file = os.tmpname()
-
-  os.execute("(cd " .. process.quote(cwd) .. " && " .. cmd .. " > " .. process.quote(stdout_file) .. " 2> " .. process.quote(stderr_file) .. "; echo $? > " .. process.quote(exit_file) .. ")")
-
-  local f = io.open(exit_file, "r")
-  if f then
-    exit_code = tonumber(f:read("*l")) or 0
-    f:close()
+  local result
+  if cmd_opt then
+    local env_prefix = ""
+    for key, value in pairs(opts.env or {}) do
+      env_prefix = env_prefix .. key .. "=" .. process.quote(value) .. " "
+    end
+    local legacy_command = env_prefix .. cmd
+    result = { exit_code = process.command_ok("cd " .. process.quote(cwd) .. " && " .. legacy_command .. " > " .. process.quote(stdout_file) .. " 2> " .. process.quote(stderr_file)) and 0 or 1, command = legacy_command }
+  else
+    result = process.run({
+      tool = tool_path,
+      args = args,
+      cwd = cwd,
+      env = opts.env,
+      stdout_file = stdout_file,
+      stderr_file = stderr_file,
+    })
   end
+  exit_code = result.exit_code
 
-  f = io.open(stdout_file, "r")
+  local f = io.open(stdout_file, "r")
   if f then
     stdout_text = f:read("*a") or ""
     f:close()
@@ -122,7 +125,6 @@ function native_runner.run(opts)
 
   os.remove(stdout_file)
   os.remove(stderr_file)
-  os.remove(exit_file)
 
   local missing_outputs = {}
   for _, out in ipairs(outputs) do
@@ -135,7 +137,8 @@ function native_runner.run(opts)
     ok = (exit_code == 0) and (#missing_outputs == 0),
     missing_tool = false,
     tool = tool,
-    cmd = cmd,
+    resolved_tool = tool_path,
+    cmd = result.command or cmd,
     cwd = cwd,
     description = description,
     exit_code = exit_code,
@@ -153,6 +156,10 @@ function native_runner.spawn_background(opts, stdout_file, stderr_file, exit_fil
   local tool_path = native_runner.find_tool(tool)
   if not tool_path then
     return nil, "tool not found: " .. tool
+  end
+
+  if process.is_windows() then
+    return nil, "parallel native tasks are not supported on Windows in this release; run with --jobs 1"
   end
 
   local cmd

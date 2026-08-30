@@ -41,8 +41,11 @@ end
 ---@return string|nil err
 local function query_artifact(moon_bin, artifact_hash)
   if not artifact_hash or artifact_hash == "" then return nil, "missing artifact_hash" end
-  local cmd = process.quote(moon_bin or "moon") .. " store query --by-artifact-hash " .. process.quote(artifact_hash) .. " --json"
-  local output = process.capture(cmd)
+  local result = process.capture_run({
+    tool = moon_bin or "moon",
+    args = { "store", "query", "--by-artifact-hash", artifact_hash, "--json" },
+  })
+  local output = result.exit_code == 0 and result.stdout or ""
   if output == "" then return nil, "empty moon store query output" end
   local decoded, _, err = dkjson.decode(output)
   if not decoded then return nil, err or "invalid moon store query JSON" end

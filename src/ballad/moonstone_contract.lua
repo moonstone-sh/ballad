@@ -7,19 +7,23 @@ local process = require("ballad.process")
 
 local contract = {}
 
-local function capture_json(root, moon_bin, command, required)
-  local shell = process.quote(moon_bin or "moon") .. " -C " .. process.quote(root) .. " " .. command .. " 2>/dev/null"
-  local output = process.capture(shell)
+local function capture_json(root, moon_bin, args, required)
+  local invocation = { "-C", root }
+  for _, arg in ipairs(args) do invocation[#invocation + 1] = arg end
+  local result = process.capture_run({ tool = moon_bin or "moon", args = invocation })
+  local output = result.exit_code == 0 and result.stdout or ""
+  local description = table.concat(args, " ")
   if output == "" then
     if required then
-      error("moonstone contract query failed: moon " .. command)
+      error("moonstone contract query failed: moon " .. description
+        .. (result.stderr ~= "" and ("\n" .. result.stderr) or ""))
     end
     return nil
   end
 
   local decoded, _, err = dkjson.decode(output)
   if type(decoded) ~= "table" then
-    error("moonstone contract query returned invalid JSON for 'moon " .. command .. "': " .. tostring(err))
+    error("moonstone contract query returned invalid JSON for 'moon " .. description .. "': " .. tostring(err))
   end
   return decoded
 end
@@ -28,7 +32,7 @@ end
 ---@param moon_bin string|nil
 ---@return table
 function contract.manifest_export(root, moon_bin)
-  local document = capture_json(root, moon_bin, "manifest export --json", true)
+  local document = capture_json(root, moon_bin, { "manifest", "export", "--json" }, true)
   if document.contract ~= "moonstone:manifest:v1" or type(document.manifest) ~= "table" then
     error("moonstone contract query returned an unsupported manifest document")
   end
@@ -81,7 +85,7 @@ function contract.lock_export(root, moon_bin)
   local lock_path = path.join(root, "moonstone.lock")
   if not fs.read_file(lock_path) then return nil end
 
-  local document = capture_json(root, moon_bin, "lock export --json", true)
+  local document = capture_json(root, moon_bin, { "lock", "export", "--json" }, true)
   if document.contract ~= "moonstone:lock:v1" then
     error("moonstone contract query returned an unsupported lock document")
   end

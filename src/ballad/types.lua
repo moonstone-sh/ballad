@@ -357,6 +357,8 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field runnable boolean|nil Whether to generate a launcher.
 ---@field bundle_runtime boolean|nil Bundle runtime binary (`lua`/`luajit`) into `bin/`.
 ---@field bundle_interpreter boolean|nil Alias for `bundle_runtime`.
+---@field include string[]|nil Project file glob patterns to export; defaults to all non-generated project files.
+---@field exclude string[]|nil Project file glob patterns to omit after inclusion.
 
 ---@class LayoutDirectoryEntry
 ---@field from OrbitProductNode Explicit child product selected from `moonstone.orbit`.
@@ -402,6 +404,19 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field readme string|nil Path to README file (defaults to REGISTRY_README.md, then README.md if present).
 ---@field readme_content string|nil Direct string content for README.md.
 ---@field artifact_url string|nil External HTTPS URL used by `publish.sh` when `MOONSTONE_ARTIFACT_URL` is set; keeps release archives outside the registry blob store.
+---@field moon string|nil Moonstone executable used for the versioned `artifact create` contract; defaults to `MOONSTONE_CLI`, `MOONSTONE_BIN`, then `moon`.
+
+---@class RegistrySourcePackageOptions
+---@field name string Package name to put in `package.toml`.
+---@field version string Package version.
+---@field kind string|nil Package kind, defaults to `lib`.
+---@field description string|nil Package description.
+---@field include string[] Explicit source patterns to archive.
+---@field exclude string[]|nil Source patterns to omit after selection.
+---@field materialize table Moonstone materialization contract.
+---@field format "tar.gz"|"tar.zst"|nil Defaults to Moonstone-backed `tar.gz`; `tar.zst` is a POSIX legacy route.
+---@field moon string|nil Moonstone executable used for `artifact create`.
+---@field out string|nil Registry artifact output directory.
 
 ---@class RegistryRuntimeOptions
 ---@field name string|nil Runtime name, defaults to env `RUNTIME_NAME` or `lua`.
@@ -418,6 +433,7 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 
 ---@class RegistryPlugin: PluginProxy
 ---@field package fun(layout: LayoutNode, opts: RegistryPackageOptions): RegistryArtifactNode Build registry `package.toml`, tarball, and publish script from a layout.
+---@field source_package fun(project: MoonstoneProject, opts: RegistrySourcePackageOptions): RegistryArtifactNode Build a source registry descriptor and archive.
 ---@field runtime fun(opts: RegistryRuntimeOptions): RegistryArtifactNode Build registry descriptor/publish script for prebuilt runtime artifacts.
 
 ---@class NvimDependencySpec
@@ -472,20 +488,20 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field label string|nil Human-readable reaction label used in logs.
 ---@field watch NodeHandle[] Non-empty source node handles that determine when this reaction fires.
 ---@field outputs string[]|nil Paths refreshed by the effect; retained in session metadata and graph debug output.
----@field before string|nil Shell command run before the declared action, for supervision handoff or validation.
----@field effect string|nil Shell command run with `BALLAD_WATCH_REASON=change` after a matching debounced change.
----@field run NativeAction|nil Declared action replayed through Ballad's action cache after a matching debounced change.
+---@field before string|nil POSIX-only shell command run before the declared action; rejected on Windows.
+---@field effect string|nil POSIX-only shell command run with `BALLAD_WATCH_REASON=change`; rejected on Windows.
+---@field run NativeAction|nil Declared action replayed through Ballad's action cache on POSIX and as a direct argv spec by the Windows helper.
 
 ---@class WatcherInitialAction
 ---@field label string|nil Human-readable bootstrap label used in logs.
----@field before string|nil Shell command run before the declared action, for supervision handoff or validation.
----@field effect string|nil Shell command run once with `BALLAD_WATCH_REASON=initial` before snapshots begin.
----@field run NativeAction|nil Declared action replayed through Ballad's action cache during bootstrap.
+---@field before string|nil POSIX-only shell command run before the declared action; rejected on Windows.
+---@field effect string|nil POSIX-only shell command run once with `BALLAD_WATCH_REASON=initial`; rejected on Windows.
+---@field run NativeAction|nil Declared action replayed through Ballad's action cache on POSIX and as a direct argv spec by the Windows helper.
 ---@field outputs string[]|nil Paths refreshed by the bootstrap; retained in session metadata and graph debug output.
 
 ---@class WatcherOptions
 ---@field cwd string|nil Working directory for bootstrap, reactions, and cleanup commands.
----@field cleanup string|nil Shell command invoked exactly once by the POSIX supervisor on normal exit or `INT`, `TERM`, or `HUP`.
+---@field cleanup string|nil POSIX-only shell command invoked exactly once on normal exit or `INT`, `TERM`, or `HUP`; rejected on Windows.
 ---@field interval number|nil Poll interval in seconds; defaults to `0.5`.
 ---@field debounce number|nil Quiet period before a changed reaction runs; defaults to `0.1`.
 ---@field state_dir string|nil Directory for the generated supervised shell script; defaults to `.ballad/watchers`.

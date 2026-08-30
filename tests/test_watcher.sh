@@ -15,7 +15,8 @@ return ballad.partiture(function(p)
     initial = {
       label = "bootstrap",
       outputs = { "watched.txt" },
-      effect = "test \"$BALLAD_WATCH_REASON\" = initial && printf ready > watched.txt",
+      before = "test \"$BALLAD_WATCH_REASON\" = initial && printf before > before.txt",
+      effect = "test \"$BALLAD_WATCH_REASON\" = initial && test \"$(cat before.txt)\" = before && printf ready > watched.txt",
     },
     reactions = {
       {
@@ -39,6 +40,7 @@ printf 'return true\n' > src/main.lua
   exit 1
 }
 test "$(cat watched.txt)" = "ready"
+test "$(cat before.txt)" = "before"
 GRAPH=$(find .ballad/runs -name graph.json -type f | head -n 1)
 test -n "$GRAPH"
 grep -q '"watch":\["node_1"\]' "$GRAPH"

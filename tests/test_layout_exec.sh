@@ -63,6 +63,9 @@ export LUA_PATH
 luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
 
 test -x dist/meteorite/bin/meteorite || { echo "FAIL: launcher missing or not executable"; exit 1; }
+test -f dist/meteorite/bin/meteorite.cmd || { echo "FAIL: Windows launcher missing"; exit 1; }
+grep -q 'set "LUA_BIN=' dist/meteorite/bin/meteorite.cmd || { echo "FAIL: Windows launcher does not select an interpreter"; exit 1; }
+grep -q 'generated\\app\\main.lua' dist/meteorite/bin/meteorite.cmd || { echo "FAIL: Windows launcher entry is not normalized"; exit 1; }
 test -f dist/meteorite/libexec/meteorite/generated/app/main.lua || { echo "FAIL: project entry missing"; exit 1; }
 test ! -e dist/meteorite/libexec/meteorite/unused/notes.txt || { echo "FAIL: excluded project file exported"; exit 1; }
 test -f dist/meteorite/libexec/meteorite/lua/helper/message.lua || { echo "FAIL: Lua dependency missing"; exit 1; }

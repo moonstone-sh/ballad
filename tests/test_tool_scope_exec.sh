@@ -64,6 +64,8 @@ export LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.m
 luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
 
 test -x dist/formatter/bin/formatter || { echo "FAIL: launcher missing or not executable"; exit 1; }
+test -f dist/formatter/bin/formatter.cmd || { echo "FAIL: Windows tool launcher missing"; exit 1; }
+grep -q 'set "PATH=%LIBEXEC%\\bin;%PATH%"' dist/formatter/bin/formatter.cmd || { echo "FAIL: Windows tool launcher does not expose tool PATH"; exit 1; }
 test -f dist/formatter/libexec/formatter/bin/formatter || { echo "FAIL: tool executable missing"; exit 1; }
 test -f dist/formatter/libexec/formatter/lua/helper/message.lua || { echo "FAIL: tool Lua closure missing"; exit 1; }
 test -f dist/formatter/libexec/formatter/lib/formatter_native.so || { echo "FAIL: tool C-module closure missing"; exit 1; }

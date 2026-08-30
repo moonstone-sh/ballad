@@ -3,11 +3,12 @@ local fs = require("ballad.fs")
 local path = require("ballad.path")
 local process = require("ballad.process")
 local native_action = require("ballad.native_action")
+local dkjson = require("dkjson")
 
 ---@class WatcherPluginContract
 local watcher = {
   name = "ballad.plugins.watcher",
-  version = "0.1.1",
+  version = "0.1.2",
   methods = {
     watch = {
       inputs = {},
@@ -268,6 +269,245 @@ local function write_script(node_id, initial, reactions, options)
   return script_path
 end
 
+-- Windows has no safe shell-string boundary in Lua 5.1.  The native helper
+-- receives this document as data and is solely responsible for direct argv
+-- execution and its watcher lifecycle.  Keep this encoder local and sorted:
+-- dkjson intentionally preserves table iteration order for objects, which is
+-- not a manifest contract.
+local json_array_marker = {}
+
+local function json_array(values)
+  return setmetatable(values or {}, json_array_marker)
+end
+
+local function json_string(value)
+  local escapes = {
+    ['"'] = '\\"', ['\\'] = '\\\\', ['\b'] = '\\b', ['\f'] = '\\f',
+    ['\n'] = '\\n', ['\r'] = '\\r', ['\t'] = '\\t',
+  }
+  return '"' .. value:gsub('[%z\1-\31\\"]', function(char)
+    return escapes[char] or string.format("\\u%04x", string.byte(char))
+  end) .. '"'
+end
+
+local function canonical_json(value)
+  local kind = type(value)
+  if kind == "nil" then return "null" end
+  if kind == "boolean" then return value and "true" or "false" end
+  if kind == "string" then return json_string(value) end
+  if kind == "number" then
+    if value ~= value or value == math.huge or value == -math.huge then error("watcher manifest cannot encode a non-finite number") end
+    return dkjson.encode(value)
+  end
+  if kind ~= "table" then error("watcher manifest cannot encode " .. kind) end
+
+  if getmetatable(value) == json_array_marker then
+    local encoded = {}
+    for index, child in ipairs(value) do encoded[#encoded + 1] = canonical_json(child) end
+    return "[" .. table.concat(encoded, ",") .. "]"
+  end
+
+  local keys = {}
+  for key, child in pairs(value) do
+    if child ~= nil then
+      if type(key) ~= "string" then error("watcher manifest object keys must be strings") end
+      keys[#keys + 1] = key
+    end
+  end
+  table.sort(keys)
+  local encoded = {}
+  for _, key in ipairs(keys) do
+    encoded[#encoded + 1] = json_string(key) .. ":" .. canonical_json(value[key])
+  end
+  return "{" .. table.concat(encoded, ",") .. "}"
+end
+
+local function string_array(values, subject)
+  if values == nil then return json_array({}) end
+  if type(values) ~= "table" then error(subject .. " must be an array") end
+  local copied = {}
+  for index, value in ipairs(values) do
+    if type(value) ~= "string" or value == "" then error(subject .. " " .. index .. " must be a non-empty string") end
+    copied[#copied + 1] = value
+  end
+  return json_array(copied)
+end
+
+local function windows_action_spec(action, subject)
+  if not action then return nil end
+  local opts = action:to_table()
+  if opts.cmd ~= nil then
+    error(subject .. " uses task.native cmd; Windows watchers require tool plus args and will not pass cmd through cmd.exe")
+  end
+  if opts.toolchain ~= nil then
+    error(subject .. " uses task.native toolchain.command; Windows watchers require an explicit toolchain_fingerprint instead of a shell command")
+  end
+  if type(opts.tool) ~= "string" or opts.tool == "" then
+    error(subject .. " requires task.native({ tool = ..., args = ... }) on Windows")
+  end
+  local argv = { opts.tool }
+  for _, argument in ipairs(opts.args or {}) do
+    if type(argument) ~= "string" then error(subject .. " task.native args must be strings") end
+    argv[#argv + 1] = argument
+  end
+  if opts.cwd ~= nil and (type(opts.cwd) ~= "string" or opts.cwd == "") then
+    error(subject .. " task.native cwd must be a non-empty string")
+  end
+  local env = {}
+  if opts.env ~= nil and type(opts.env) ~= "table" then error(subject .. " task.native env must be a table") end
+  for key, value in pairs(opts.env or {}) do
+    if type(key) ~= "string" or type(value) ~= "string" then
+      error(subject .. " task.native env must map strings to strings")
+    end
+    env[key] = value
+  end
+  local result = {
+    id = opts.id,
+    argv = json_array(argv),
+    cwd = opts.cwd or ".",
+    env = env,
+    inputs = string_array(opts.inputs, subject .. " task.native inputs"),
+    outputs = string_array(opts.outputs, subject .. " task.native outputs"),
+    cacheable = opts.cacheable ~= false,
+  }
+  if opts.toolchain_fingerprint ~= nil then
+    if type(opts.toolchain_fingerprint) ~= "string" then error(subject .. " task.native toolchain_fingerprint must be a string") end
+    result.toolchain_fingerprint = opts.toolchain_fingerprint
+  end
+  return result, opts.outputs or {}
+end
+
+local function append_output_exclusions(exclusions, seen, outputs, subject)
+  if outputs == nil then return end
+  if type(outputs) ~= "table" then error(subject .. " outputs must be an array") end
+  for index, output in ipairs(outputs) do
+    if type(output) ~= "string" or output == "" then error(subject .. " output " .. index .. " must be a non-empty string") end
+    output = path.normalize(output)
+    if not seen[output] then
+      exclusions[#exclusions + 1] = output
+      seen[output] = true
+    end
+  end
+end
+
+local function windows_legacy_shell_diagnostic(initial, reactions, options)
+  local fields = {}
+  local function collect(step, subject)
+    if not step then return end
+    if step.before ~= nil then fields[#fields + 1] = subject .. ".before" end
+    if step.effect ~= nil then fields[#fields + 1] = subject .. ".effect" end
+  end
+  collect(initial, "watcher initial")
+  for index, reaction in ipairs(reactions) do collect(reaction, "watcher reaction " .. index) end
+  if options.cleanup ~= nil then fields[#fields + 1] = "watcher options.cleanup" end
+  if #fields == 0 then return nil end
+  return "watcher.watch on Windows does not support legacy raw shell fields (" .. table.concat(fields, ", ")
+    .. "); replace them with task.native({ id = ..., tool = ..., args = ... }). Ballad will not pass shell text through cmd.exe."
+end
+
+local function configured_moonstone_bin()
+  for _, variable in ipairs({ "MOONSTONE_BIN", "MOONSTONE_CLI" }) do
+    local value = os.getenv(variable)
+    if value and value ~= "" then return value end
+  end
+  return "moon"
+end
+
+local function resolve_windows_helper(ctx)
+  local result = process.capture_run({
+    tool = configured_moonstone_bin(),
+    args = { "tool", "resolve", "ballad-watch", "--json" },
+  })
+  if result.exit_code ~= 0 then
+    ctx.fail("Windows watcher helper is unavailable: `moon tool resolve ballad-watch --json` failed"
+      .. (result.stderr ~= "" and ("\n" .. result.stderr) or "")
+      .. "\nProvision a Windows `ballad-watch` helper as a Moonstone helper dependency and run `moon sync`. "
+      .. "Ballad requires helper protocol ballad:watcher:v1 and does not provision a substitute.")
+  end
+  local document, _, decode_error = dkjson.decode(result.stdout or "")
+  if type(document) ~= "table" or document.contract ~= "moonstone:tool-resolve:v1"
+    or type(document.path) ~= "string" or document.path == "" then
+    ctx.fail("Windows watcher helper resolution requires Moonstone contract moonstone:tool-resolve:v1; "
+      .. "the configured Moonstone is missing or too old"
+      .. (decode_error and (": " .. tostring(decode_error)) or "")
+      .. ". Upgrade Moonstone, provision `ballad-watch`, and run `moon sync`.")
+  end
+  return document
+end
+
+local function write_windows_manifest(node_id, initial, reactions, options)
+  local interval = tonumber(options.interval) or 0.5
+  local debounce = tonumber(options.debounce) or 0.1
+  if interval <= 0 then error("watcher.watch interval must be greater than zero") end
+  if debounce < 0 then error("watcher.watch debounce cannot be negative") end
+  if options.cwd ~= nil and (type(options.cwd) ~= "string" or options.cwd == "") then
+    error("watcher.watch cwd must be a non-empty string")
+  end
+  local state_dir = options.state_dir or ".ballad/watchers"
+  if type(state_dir) ~= "string" or state_dir == "" then error("watcher.watch state_dir must be a non-empty string") end
+
+  local exclusions, excluded = {}, {}
+  local function manifest_step(step, subject, include_inputs)
+    if not step then return nil end
+    local action, action_outputs = windows_action_spec(step.action, subject)
+    append_output_exclusions(exclusions, excluded, step.outputs, subject)
+    append_output_exclusions(exclusions, excluded, action_outputs, subject .. " task.native")
+    local document = {
+      label = step.label,
+      outputs = string_array(step.outputs, subject .. " outputs"),
+      action = action,
+    }
+    if include_inputs then
+      document.source_nodes = string_array(step.watch, subject .. " source nodes")
+      document.inputs = string_array(step.inputs, subject .. " inputs")
+    end
+    return document
+  end
+
+  local manifest = {
+    contract = "ballad:watcher:v1",
+    node = node_id,
+    mode = options.once and "once" or "daemon",
+    cwd = options.cwd or ".",
+    interval = interval,
+    debounce = debounce,
+    initial = manifest_step(initial, "watcher initial", false),
+    reactions = json_array({}),
+    output_exclusions = json_array(exclusions),
+  }
+  for index, reaction in ipairs(reactions) do
+    manifest.reactions[#manifest.reactions + 1] = manifest_step(reaction, "watcher reaction " .. index, true)
+  end
+
+  fs.mkdir(state_dir)
+  local manifest_path = path.join(state_dir, node_id .. ".windows.json")
+  fs.write_file(manifest_path, canonical_json(manifest) .. "\n")
+  return manifest_path, manifest
+end
+
+local function run_windows_helper(ctx, manifest_path, mode)
+  local helper = resolve_windows_helper(ctx)
+  local result = process.capture_run({
+    tool = helper.path,
+    args = { "--manifest", path.absolute(manifest_path) },
+  })
+  if result.exit_code ~= 0 then
+    ctx.fail("Windows watcher helper failed (the resolved helper is missing or too old): " .. helper.path
+      .. "\nBallad requires helper protocol ballad:watcher:v1 (`ballad-watch --manifest <absolute-manifest>`)."
+      .. (result.stderr ~= "" and ("\n" .. result.stderr) or ""))
+  end
+  local response, _, decode_error = dkjson.decode(result.stdout or "")
+  local expected_status = mode == "once" and "completed" or "stopped"
+  if type(response) ~= "table" or response.contract ~= "ballad:watcher-result:v1"
+    or response.status ~= expected_status or response.mode ~= mode then
+    ctx.fail("Windows watcher helper is missing or too old: it did not return the required "
+      .. "ballad:watcher-result:v1 response for " .. mode
+      .. (decode_error and (" (" .. tostring(decode_error) .. ")") or "")
+      .. ". Provision a compatible `ballad-watch` helper and run `moon sync`.")
+  end
+  return helper
+end
+
 ---Create and run a supervised watcher session.
 ---`initial` runs once; `reactions` run only after their own debounced input changes.
 ---@param ctx PluginCtx
@@ -299,6 +539,32 @@ function watcher.watch(ctx, _, spec)
   end
   bind_controls(initial)
   for _, reaction in ipairs(reactions) do bind_controls(reaction) end
+
+  if process.is_windows() then
+    local shell_diagnostic = windows_legacy_shell_diagnostic(initial, reactions, options)
+    if shell_diagnostic then ctx.fail(shell_diagnostic) end
+    local manifest_path = write_windows_manifest(ctx.node.id, initial, reactions, options)
+    local mode = options.once and "once" or "daemon"
+    local helper = run_windows_helper(ctx, manifest_path, mode)
+    return graph.AssetSet.new({ ctx.graph:add_asset({
+      kind = "watch_session",
+      generated = true,
+      output_path = manifest_path,
+      virtual_path = "watcher/" .. ctx.node.id .. ".windows.json",
+      metadata = {
+        mode = mode,
+        manifest = manifest_path,
+        helper = {
+          path = helper.path,
+          version = helper.version,
+          digest = helper.digest,
+          source = helper.source,
+        },
+        initial = initial,
+        reactions = reactions,
+      },
+    }) })
+  end
 
   if options.once then
     if initial then

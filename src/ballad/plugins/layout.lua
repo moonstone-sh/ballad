@@ -1,6 +1,7 @@
 local graph = require("ballad.graph")
 local fs = require("ballad.fs")
 local path = require("ballad.path")
+local launchers = require("ballad.launcher")
 
 local function local_package_name(name)
   local local_name = name:match("/([^/]+)$") or name
@@ -196,7 +197,9 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
       for bin_key, rel_path in pairs(rt.bin) do
         local abs_src = path.join(art_path, rel_path)
         if fs.is_file(abs_src) then
-          add_file({ src = abs_src, dest = "bin/" .. bin_key, kind = "package", executable = true })
+          -- Preserve .exe on Windows runtime payloads; launchers discover the
+          -- actual executable name instead of assuming POSIX bin names.
+          add_file({ src = abs_src, dest = "bin/" .. path.basename(rel_path), kind = "package", executable = true })
         end
       end
     else
@@ -231,6 +234,16 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
     }
     local launcher = table.concat(launcher_parts, "\n") .. "\n"
     add_file({ dest = "bin/" .. bin_name, content = launcher, kind = "generated", executable = true })
+    add_file({
+      dest = "bin/" .. bin_name .. ".cmd",
+      content = launchers.windows_libexec({
+        libexec_root = libexec_root,
+        interpreter = interpreter,
+        entry = entry,
+      lua_paths = lua_paths,
+      }),
+      kind = "generated",
+    })
   end
   local assets = graph.AssetSet.new()
   for _, task in ipairs(files) do
@@ -277,10 +290,15 @@ local function build_tool_exec_layout(ctx, inputs, opts)
   local name = opts.name or tool.name
   local bin_name = opts.bin or name
   local libexec_root = "libexec/" .. name
+  local tool_entry = "bin/" .. tool.name
   local assets = graph.AssetSet.new()
   local destinations = {}
   for _, asset in ipairs(inputs[1].assets) do
     if asset.kind == "tool_source" and asset.source_path and asset.virtual_path then
+      local candidate = path.basename(asset.virtual_path)
+      if asset.virtual_path:sub(1, 4) == "bin/" and (candidate == tool.name or candidate:lower() == (tool.name .. ".exe"):lower()) then
+        tool_entry = asset.virtual_path
+      end
       local destination = libexec_root .. "/" .. asset.virtual_path
       if not destinations[destination] then
         destinations[destination] = true
@@ -310,7 +328,7 @@ local function build_tool_exec_layout(ctx, inputs, opts)
     'export PATH="$LIBEXEC/bin:${PATH:-}"',
     'export LUA_PATH="$LIBEXEC/lua/?.lua;$LIBEXEC/lua/?/init.lua;${LUA_PATH:-};;"',
     'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
-    'exec "$LUA_BIN" "$LIBEXEC/bin/' .. tool.name .. '" "$@"',
+    'exec "$LUA_BIN" "$LIBEXEC/' .. tool_entry .. '" "$@"',
   }, "\n") .. "\n"
   assets:add(ctx.graph:add_asset({
     kind = "generated",
@@ -320,9 +338,22 @@ local function build_tool_exec_layout(ctx, inputs, opts)
     metadata = { executable = true },
   }))
   assets:add(ctx.graph:add_asset({
+    kind = "generated",
+    virtual_path = "bin/" .. bin_name .. ".cmd",
+    content = launchers.windows_libexec({
+      libexec_root = libexec_root,
+      interpreter = runtime_name,
+      entry = tool_entry,
+      lua_paths = { "lua" },
+      path_prepend = true,
+      direct = tool_entry:lower():match("%.exe$") ~= nil,
+    }),
+    generated = true,
+  }))
+  assets:add(ctx.graph:add_asset({
     kind = "files",
     virtual_path = "tool-exec-root",
-    metadata = { layout = "tool_exec", name = name, bin_name = bin_name, entry = "bin/" .. tool.name },
+    metadata = { layout = "tool_exec", name = name, bin_name = bin_name, entry = tool_entry },
   }))
   assets:add(tool_asset)
   return assets
@@ -423,7 +454,8 @@ return {
     -- Project files at root-relative virtual paths
     for _, source in ipairs(fs.list_files(meta.root)) do
       local relative = path.relative(source, meta.root)
-      if not (relative:match("^%.git/") or relative:match("^%.moonstone/") or relative:match("^%.ballad/") or relative:match("^dist/") or relative == "moonstone.lock") then
+      if not is_default_excluded(relative) and matches_any(relative, opts.include)
+        and not (opts.exclude and matches_any(relative, opts.exclude)) then
         local asset = ctx.graph:add_asset({
           kind = "project",
           source_path = source,
@@ -491,6 +523,16 @@ return {
         kind = "generated",
         virtual_path = bin_name,
         content = launcher,
+        generated = true,
+        metadata = { executable = true },
+      }))
+      assets:add(ctx.graph:add_asset({
+        kind = "generated",
+        virtual_path = bin_name .. ".cmd",
+        content = launchers.windows_flat({
+          interpreter = interpreter,
+          entry = entry,
+        }),
         generated = true,
       }))
     end

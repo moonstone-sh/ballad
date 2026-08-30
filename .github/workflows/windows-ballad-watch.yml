@@ -1,0 +1,76 @@
+name: Ballad Windows watcher
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ballad-watch:
+    name: Build and run ballad-watch
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Run ballad-watch tests
+        working-directory: native/ballad-watch
+        run: zig build test
+      - name: Build ballad-watch
+        working-directory: native/ballad-watch
+        run: zig build -Doptimize=ReleaseSafe
+      - name: Run a v1 once manifest
+        working-directory: native/ballad-watch
+        shell: pwsh
+        run: |
+          @'
+          {
+            "contract": "ballad:watcher:v1",
+            "node": "windows_ci",
+            "mode": "once",
+            "cwd": ".",
+            "interval": 0.1,
+            "debounce": 0,
+            "initial": {
+              "label": "ci",
+              "outputs": [],
+              "action": {
+                "argv": ["cmd.exe", "/c", "exit", "0"],
+                "cwd": ".",
+                "env": {},
+                "inputs": [],
+                "outputs": [],
+                "cacheable": false
+              }
+            },
+            "reactions": [{
+              "label": "ci",
+              "source_nodes": ["windows_ci_source"],
+              "inputs": ["src/**"],
+              "outputs": [],
+              "action": {
+                "argv": ["cmd.exe", "/c", "exit", "0"],
+                "cwd": ".",
+                "env": {},
+                "inputs": [],
+                "outputs": [],
+                "cacheable": false
+              }
+            }],
+            "output_exclusions": []
+          }
+          '@ | Set-Content -Path watcher-manifest.json -Encoding utf8NoBOM
+
+          $result = & .\zig-out\bin\ballad-watch.exe --manifest watcher-manifest.json
+          if ($LASTEXITCODE -ne 0) {
+            throw "ballad-watch exited with code $LASTEXITCODE"
+          }
+          $json = ($result -join "`n") | ConvertFrom-Json
+          if ($json.contract -ne "ballad:watcher-result:v1" -or
+              $json.status -ne "completed" -or $json.mode -ne "once") {
+            throw "Unexpected ballad-watch result: $($result -join "`n")"
+          }

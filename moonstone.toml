@@ -22,4 +22,5 @@ role = "runtime"
 
 [scripts]
 play = 'lua src/main.lua play partiture.lua "$@"'
+package-ballad-watch = 'lua src/main.lua play partiture.ballad-watch.lua "$@"'
 help = "lua src/main.lua --help"

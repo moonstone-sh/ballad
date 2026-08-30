@@ -1,3 +1,7 @@
 .moonstone/
 dist/
 .ballad/
+
+# Native Windows watcher build output; helper artifacts are provisioned by Moonstone.
+native/ballad-watch/zig-out/
+native/ballad-watch/.zig-cache/

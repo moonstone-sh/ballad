@@ -9,12 +9,13 @@ local project = {}
 function project.find_root(start_path)
   local root = path.absolute(start_path or ".")
 
-  while root ~= "/" do
+  while true do
     if fs.read_file(path.join(root, "moonstone.toml")) then
       return root
     end
-
-    root = path.dirname(root)
+    local parent = path.dirname(root)
+    if parent == root then break end
+    root = parent
   end
 
   process.fail("moonstone.toml not found from " .. tostring(start_path or "."))
