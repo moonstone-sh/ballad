@@ -10,6 +10,8 @@
 ---@field readme? string relative path to README file (defaults to REGISTRY_README.md, then README.md in project root)
 ---@field readme_content? string raw README markdown content string
 ---@field origin? table immutable source provenance override ({ kind = "git", url = "https://...", revision? = "..." })
+---@field dependencies? table explicit release dependencies; runtime, helper, optional, peer, and external roles are published
+---@field local_dependency_policy? "convert"|"reject" how verified path dependencies are handled (default "convert")
 ---@field out? string output directory path for the registry artifact
 
 ---@class RegistryExternalPathRequirement
@@ -42,6 +44,8 @@
 ---@field readme_content? string raw README markdown content string
 ---@field origin? table immutable source provenance override ({ kind = "git", url = "https://...", revision? = "..." })
 ---@field materialize? RegistryMaterializeConfig materialization recipe and external-input contract
+---@field dependencies? table explicit release dependencies; runtime, helper, optional, peer, and external roles are published
+---@field local_dependency_policy? "convert"|"reject" how verified path dependencies are handled (default "convert")
 ---@field format? "tar.gz"|"tar.zst" source archive format; defaults to the portable Moonstone-backed "tar.gz" route
 ---@field moon? string path or name of the Moonstone CLI used for artifact creation
 ---@field out? string output directory path for the registry artifact
@@ -175,6 +179,132 @@ local function project_asset_from_inputs(inputs)
 		end
 	end
 	return nil
+end
+
+-- A source release must describe what its users need, not what its author used
+-- to run tests or produce the archive.  Keep this projection in one place so
+-- prebuilt and source descriptors cannot silently disagree.
+local RELEASE_DEPENDENCY_ROLES = {
+	runtime = true,
+	helper = true,
+	optional = true,
+	peer = true,
+	external = true,
+}
+
+local function dependency_entries_from(raw_deps)
+	local entries = {}
+	if type(raw_deps) ~= "table" then return entries end
+	if raw_deps[1] and type(raw_deps[1]) == "table" then
+		for _, dep in ipairs(raw_deps) do
+			entries[#entries + 1] = {
+				role = dep.role or "runtime",
+				name = dep.name or dep.package,
+				constraint = dep.constraint or "*",
+				registry = dep.resolver or dep.registry,
+			}
+		end
+		return entries
+	end
+	for role, dep_list in pairs(raw_deps) do
+		if type(dep_list) == "table" then
+			for dep_name, spec in pairs(dep_list) do
+				entries[#entries + 1] = {
+					role = role,
+					name = type(spec) == "table" and (spec.package or spec.name or dep_name) or dep_name,
+					constraint = type(spec) == "table" and (spec.constraint or "*") or tostring(spec),
+					registry = type(spec) == "table" and (spec.resolver or spec.registry) or nil,
+				}
+			end
+		end
+	end
+	return entries
+end
+
+local function normalize_release_dependency(ctx, dependency, project_root, opts)
+	local role = dependency.role == "external" and "peer" or dependency.role
+	if not RELEASE_DEPENDENCY_ROLES[role] then return nil end
+	if type(dependency.name) ~= "string" or dependency.name == "" then
+		ctx.fail("registry release dependency requires a non-empty name")
+	end
+	local constraint = dependency.constraint or "*"
+	local resolver = dependency.registry
+	local prefix, remainder = tostring(constraint):match("^([^:]+):(.+)$")
+	if prefix and prefix ~= "path" and prefix ~= "link" then
+		resolver = resolver or prefix
+		constraint = remainder:match("@(.+)$") or "*"
+	end
+	local local_path = nil
+	if resolver == "path" then local_path = tostring(constraint):gsub("^path:", "") end
+	if prefix == "path" then local_path = remainder end
+	if resolver == "link" or prefix == "link" then
+		ctx.fail("registry release dependency " .. dependency.name
+			.. " uses link: and cannot be published deterministically; provide a registry dependency override")
+	end
+	if local_path then
+		if opts.local_dependency_policy == "reject" then
+			ctx.fail("registry release dependency " .. dependency.name
+				.. " is local (path:) and local_dependency_policy=reject")
+		end
+		if local_path == "" then ctx.fail("registry release dependency " .. dependency.name .. " has an empty path:") end
+		local root = path.join(project_root or ".", local_path)
+		local ok, loaded = pcall(project_mod.load_manifest, root, opts)
+		if not ok or not loaded or not loaded.manifest then
+			ctx.fail("registry release dependency " .. dependency.name .. " path " .. local_path
+				.. " could not be resolved as a Moonstone project")
+		end
+		local package = loaded.manifest.package or {}
+		if package.name ~= dependency.name then
+			ctx.fail("registry release dependency " .. dependency.name .. " path " .. local_path
+				.. " declares " .. tostring(package.name) .. " instead")
+		end
+		if type(package.version) ~= "string" or package.version == "" then
+			ctx.fail("registry release dependency " .. dependency.name .. " path " .. local_path .. " has no publishable version")
+		end
+		resolver, constraint = "moonstone", "^" .. package.version
+	end
+	return { role = role, registry = resolver or "moonstone", name = dependency.name, constraint = constraint }
+end
+
+local function release_dependencies(ctx, inputs, opts, fallback_metadata)
+	local project_asset = project_asset_from_inputs(inputs)
+	local project_metadata = project_asset and project_asset.metadata or nil
+	local metadata = project_metadata or fallback_metadata or {}
+	local raw_deps = opts.dependencies
+		or (project_metadata and project_metadata.dependencies)
+		or (fallback_metadata and fallback_metadata.dependencies)
+	local entries = {}
+	for _, dependency in ipairs(dependency_entries_from(raw_deps)) do
+		local normalized = normalize_release_dependency(ctx, dependency, metadata.root or metadata.project_root or ".", opts)
+		if normalized then entries[#entries + 1] = normalized end
+	end
+	table.sort(entries, function(left, right)
+		return table.concat({ left.role, left.registry, left.name, left.constraint }, "\0")
+			< table.concat({ right.role, right.registry, right.name, right.constraint }, "\0")
+	end)
+	return entries
+end
+
+local function dependency_sections(entries)
+	local sections = {}
+	for _, dependency in ipairs(entries) do
+		sections[#sections + 1] = table.concat({
+			"[[dependencies]]",
+			"name = " .. toml_quote(dependency.name),
+			"constraint = " .. toml_quote(dependency.constraint),
+			"resolver = " .. toml_quote(dependency.registry),
+			"role = " .. toml_quote(dependency.role),
+		}, "\n")
+	end
+	return table.concat(sections, "\n\n")
+end
+
+local function dependency_recipe_value(entries)
+	local values = {}
+	for _, dependency in ipairs(entries) do
+		values[#values + 1] = table.concat({ dependency.role, dependency.registry, dependency.name, dependency.constraint }, ":")
+	end
+	return table.concat(values, ",")
 end
 
 local function resolve_origin(inputs, opts)
@@ -590,6 +720,8 @@ registry.package = function(ctx, inputs, opts)
 	else
 		table.insert(provides_list, "bin:" .. bin_name .. ":bin/" .. bin_name)
 	end
+	local dependency_entries = release_dependencies(ctx, inputs, opts, meta)
+	local dependency_section = dependency_sections(dependency_entries)
 	local recipe_text = table.concat({
 		"schema=moonstone.recipe.v0",
 		"kind=prebuilt-artifact",
@@ -598,6 +730,7 @@ registry.package = function(ctx, inputs, opts)
 		"materializer=archive",
 		"target=" .. target,
 		"provides=" .. table.concat(provides_list, ","),
+		"dependencies=" .. dependency_recipe_value(dependency_entries),
 		"",
 	}, "\n")
 	local recipe_hash = canonical_recipe_hash(ctx, opts, recipe_text, artifact_dir)
@@ -627,58 +760,6 @@ registry.package = function(ctx, inputs, opts)
 			'path = "bin/' .. bin_name .. '"',
 		}, "\n")
 	end
-
-	-- Build dependency metadata from layout or explicit opts.dependencies
-	local dependency_entries = {}
-	local raw_deps = opts.dependencies or (meta and meta.dependencies)
-	if raw_deps then
-		if raw_deps[1] and type(raw_deps[1]) == "table" then
-			for _, dep in ipairs(raw_deps) do
-				dependency_entries[#dependency_entries + 1] = {
-					role = dep.role or "runtime",
-					registry = dep.resolver or dep.registry or "moonstone",
-					name = dep.name,
-					constraint = dep.constraint or "*",
-				}
-			end
-		else
-			for role, dep_list in pairs(raw_deps) do
-				if type(dep_list) == "table" then
-					for dep_name, spec in pairs(dep_list) do
-						local constraint = type(spec) == "table" and (spec.constraint or "*") or tostring(spec)
-						local registry = type(spec) == "table" and (spec.registry or spec.resolver) or nil
-						local prefix, remainder = constraint:match("^([^:]+):(.+)$")
-						if prefix then
-							registry = registry or prefix
-							constraint = remainder:match("@(.+)$") or "*"
-						end
-						registry = registry or "moonstone"
-						dependency_entries[#dependency_entries + 1] = {
-							role = role,
-							registry = registry,
-							name = type(spec) == "table" and (spec.package or dep_name) or dep_name,
-							constraint = constraint,
-						}
-					end
-				end
-			end
-		end
-	end
-	table.sort(dependency_entries, function(left, right)
-		return table.concat({ left.role, left.registry, left.name, left.constraint }, "\0")
-			< table.concat({ right.role, right.registry, right.name, right.constraint }, "\0")
-	end)
-	local dependency_sections = {}
-	for _, dependency in ipairs(dependency_entries) do
-		dependency_sections[#dependency_sections + 1] = table.concat({
-			"[[dependencies]]",
-			"name = " .. toml_quote(dependency.name),
-			"constraint = " .. toml_quote(dependency.constraint),
-			"resolver = " .. toml_quote(dependency.registry),
-			"role = " .. toml_quote(dependency.role),
-		}, "\n")
-	end
-	local dependency_section = table.concat(dependency_sections, "\n\n")
 
 	local package_lines = {
 		"[package]",
@@ -967,6 +1048,7 @@ registry.source_package = function(ctx, inputs, opts)
 		blob_bytes = handle and handle:seek("end") or 0
 		if handle then handle:close() end
 	end
+	local release_dependency_entries = release_dependencies(ctx, inputs, opts)
 	local recipe_text = table.concat({
 		"schema=moonstone.recipe.v0",
 		"kind=source-artifact",
@@ -974,6 +1056,7 @@ registry.source_package = function(ctx, inputs, opts)
 		"version=" .. version,
 		"materializer=" .. tostring(materialize.type),
 		"materialize=" .. toml_inline_value(materialize),
+		"dependencies=" .. dependency_recipe_value(release_dependency_entries),
 		"target=source",
 		"hash=" .. blob_hash,
 		"",
@@ -986,6 +1069,7 @@ registry.source_package = function(ctx, inputs, opts)
 
 	local readme_content = resolve_readme_content(inputs, opts)
 	local origin = resolve_origin(inputs, opts)
+	local dependency_section = dependency_sections(release_dependency_entries)
 	local package_lines = {
 		"[package]",
 		"name = " .. toml_quote(package_name),
@@ -997,6 +1081,10 @@ registry.source_package = function(ctx, inputs, opts)
 		table.insert(package_lines, "readme = " .. toml_quote(README_SIDECAR))
 	end
 	append_origin(package_lines, origin)
+	if dependency_section ~= "" then
+		table.insert(package_lines, "")
+		table.insert(package_lines, dependency_section)
+	end
 	for _, line in ipairs({
 		"",
 		"[[artifacts]]",

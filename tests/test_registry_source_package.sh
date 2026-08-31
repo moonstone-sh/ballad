@@ -5,11 +5,29 @@ BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-source-package.XXXXXX)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-mkdir -p "$WORK_DIR/src" "$WORK_DIR/native" "$WORK_DIR/.moonstone/env" "$WORK_DIR/zig-out"
+mkdir -p "$WORK_DIR/src" "$WORK_DIR/native" "$WORK_DIR/.moonstone/env" "$WORK_DIR/zig-out" "$WORK_DIR/fake-bin"
+mkdir -p "$WORK_DIR/runtime"
 cat > "$WORK_DIR/moonstone.toml" <<'TOML'
 [package]
 name = "user/meteorite"
 version = "1.2.3"
+kind = "lib"
+
+[[dependencies]]
+name = "user/runtime"
+constraint = "path:runtime"
+registry = "path"
+role = "runtime"
+
+[[dependencies]]
+name = "user/build-tool"
+constraint = "^9.9.9"
+role = "tool"
+TOML
+cat > "$WORK_DIR/runtime/moonstone.toml" <<'TOML'
+[package]
+name = "user/runtime"
+version = "4.5.6"
 kind = "lib"
 TOML
 cat > "$WORK_DIR/build.zig" <<'ZIG'
@@ -29,6 +47,48 @@ version = "5.4.0"
 abi = "lua54"
 TOML
 printf 'build output\n' > "$WORK_DIR/zig-out/output"
+
+cat > "$WORK_DIR/fake-bin/moon" <<'SH'
+#!/usr/bin/env sh
+set -eu
+if [ "${1:-}" = "-C" ]; then
+  root=$2
+  shift 2
+  case "${1:-}:${2:-}:${3:-}" in
+    manifest:export:--json)
+      if [ "$(basename "$root")" = runtime ]; then
+        printf '%s\n' '{"contract":"moonstone:manifest:v1","manifest":{"project":{"name":"user/runtime","version":"4.5.6","kind":"lib"}}}'
+      else
+        printf '%s\n' '{"contract":"moonstone:manifest:v1","manifest":{"project":{"name":"user/meteorite","version":"1.2.3","kind":"lib"},"dependencies":[{"name":"user/runtime","constraint":"path:runtime","registry":"path","role":"runtime"},{"name":"user/build-tool","constraint":"^9.9.9","role":"tool"}]}}'
+      fi
+      exit 0
+      ;;
+    lock:export:--json)
+      printf '%s\n' '{"contract":"moonstone:lock:v1","realizations":[]}'
+      exit 0
+      ;;
+  esac
+fi
+[ "${1:-}" = artifact ] && [ "${2:-}" = create ] && [ "${3:-}" = --out ] && [ "${5:-}" = --json ] && [ "${6:-}" = -- ] || exit 64
+out=$4
+shift 6
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+while [ "$#" -gt 0 ]; do
+  virtual=$1 source=$2 mode=$3
+  if [ "$virtual" = recipe ] && grep -q SQLITE_HEADERS "$source"; then
+    digest=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  fi
+  mkdir -p "$stage/$(dirname "$virtual")"
+  cp "$source" "$stage/$virtual"
+  chmod "$mode" "$stage/$virtual"
+  shift 3
+done
+digest=${digest:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+  (cd "$stage" && tar -czf "$out" $(find . -type f -print))
+printf '{"contract":"moonstone:artifact-create:v1","path":"%s","bytes":1,"b3":"b3:%s"}\n' "$out" "$digest"
+SH
+chmod +x "$WORK_DIR/fake-bin/moon"
 
 cat > "$WORK_DIR/partiture.lua" <<'LUA'
 local ballad = require("ballad")
@@ -78,6 +138,7 @@ LUA
 cd "$WORK_DIR"
 LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
+export MOONSTONE_CLI="$WORK_DIR/fake-bin/moon"
 luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
 
 test -f dist/registry/meteorite/package.toml || { echo "FAIL: package.toml missing"; exit 1; }
@@ -110,9 +171,9 @@ fi
 grep -q 'kind must be include or library' "$WORK_DIR/run-invalid-external.log" || { cat "$WORK_DIR/run-invalid-external.log"; echo "FAIL: invalid external path diagnostic missing"; exit 1; }
 
 tar -tzf dist/registry/meteorite/meteorite-1.2.3-source.tar.gz > "$WORK_DIR/tar-list.txt"
-grep -q '^moonstone.toml$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: moonstone.toml not archived"; cat "$WORK_DIR/tar-list.txt"; exit 1; }
-grep -q '^src/app.lua$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: src/app.lua not archived"; exit 1; }
-grep -q '^native/module.zig$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: native/module.zig not archived"; exit 1; }
+grep -Eq '^\.?/?moonstone.toml$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: moonstone.toml not archived"; cat "$WORK_DIR/tar-list.txt"; exit 1; }
+grep -Eq '^\.?/?src/app.lua$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: src/app.lua not archived"; exit 1; }
+grep -Eq '^\.?/?native/module.zig$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: native/module.zig not archived"; exit 1; }
 if grep -q '^\.moonstone/' "$WORK_DIR/tar-list.txt" || grep -q '^zig-out/' "$WORK_DIR/tar-list.txt"; then
   echo "FAIL: excluded build/private paths archived"
   cat "$WORK_DIR/tar-list.txt"
@@ -150,6 +211,14 @@ LUA
 luajit "$BALLAD_ROOT/src/main.lua" play partiture_project.lua > "$WORK_DIR/run-project.log" 2>&1 || { cat "$WORK_DIR/run-project.log"; exit 1; }
 test -f dist/registry/meteorite-project/package.toml || { echo "FAIL: project input package.toml missing"; exit 1; }
 grep -q 'version = "1.2.3"' dist/registry/meteorite-project/package.toml || { echo "FAIL: project version not used"; exit 1; }
+grep -A4 '^\[\[dependencies\]\]$' dist/registry/meteorite-project/package.toml | grep -q 'name = "user/runtime"' || { echo "FAIL: source descriptor omitted runtime dependency"; cat dist/registry/meteorite-project/package.toml; exit 1; }
+grep -A4 '^\[\[dependencies\]\]$' dist/registry/meteorite-project/package.toml | grep -q 'constraint = "\^4.5.6"' || { echo "FAIL: local runtime dependency was not converted to a release constraint"; cat dist/registry/meteorite-project/package.toml; exit 1; }
+grep -A4 '^\[\[dependencies\]\]$' dist/registry/meteorite-project/package.toml | grep -q 'resolver = "moonstone"' || { echo "FAIL: local runtime dependency retained its path resolver"; cat dist/registry/meteorite-project/package.toml; exit 1; }
+if grep -q 'user/build-tool' dist/registry/meteorite-project/package.toml; then
+  echo "FAIL: source descriptor published a tool dependency"
+  cat dist/registry/meteorite-project/package.toml
+  exit 1
+fi
 
 cat > "$WORK_DIR/partiture_conventional.lua" <<'LUA'
 local ballad = require("ballad")
