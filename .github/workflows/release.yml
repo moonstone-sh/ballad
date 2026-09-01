@@ -26,8 +26,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: moonstone-sh/moonstone
-          # Pinned to the current manifest, lockfile, and projected-environment contract.
-          ref: cb4151469f82b2843a2ad918ac8da55692674913
+          # Registry artifacts require Moonstone's artifact-create contract.
+          ref: main
           path: .ci/moonstone
       - uses: mlugg/setup-zig@v2
         with:
