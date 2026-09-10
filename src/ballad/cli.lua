@@ -194,7 +194,7 @@ local function build_app()
 
     c.root(c.node({
       c.inherit(
-        c.flag("-h", "--help")
+        c.flag({ key = "help", aliases = { "-h", "--help" } })
       ),
 
       c.run(function(ctx)
@@ -203,10 +203,10 @@ local function build_app()
       end),
 
       play = c.node({
-        c.optional(c.arg("file", v.string())),
-        c.option("-j", "--jobs", v.integer()),
-        c.option("--report", v.string()),
-        c.repeated(c.option("--lua-path", v.string())),
+        c.arg({ key = "file", schema = v.string(), occurs = { min = 0, max = 1 } }),
+        c.option({ key = "jobs", aliases = { "-j", "--jobs" }, value = { schema = v.integer() } }),
+        c.option({ key = "report", aliases = { "--report" }, value = { schema = v.string() } }),
+        c.option({ key = "lua_path", aliases = { "--lua-path" }, value = { schema = v.string() }, occurs = { min = 0, max = "many" } }),
         c.passthrough("invocation_args"),
 
         c.run(function(ctx)
@@ -247,13 +247,13 @@ local function build_app()
       }),
 
       init = c.node({
-        c.optional(c.arg("template_arg", v.string())),
-        c.option("--template", v.string()),
-        c.option("--script-name", v.string()),
-        c.option("--script-command", v.string()),
-        c.flag("--no-script"),
-        c.flag("--force-script"),
-        c.flag("--moonstone-entrypoint"),
+        c.arg({ key = "template_arg", schema = v.string(), occurs = { min = 0, max = 1 } }),
+        c.option({ key = "template", aliases = { "--template" }, value = { schema = v.string() } }),
+        c.option({ key = "script_name", aliases = { "--script-name" }, value = { schema = v.string() } }),
+        c.option({ key = "script_command", aliases = { "--script-command" }, value = { schema = v.string() } }),
+        c.flag({ key = "no_script", aliases = { "--no-script" } }),
+        c.flag({ key = "force_script", aliases = { "--force-script" } }),
+        c.flag({ key = "moonstone_entrypoint", aliases = { "--moonstone-entrypoint" } }),
         c.passthrough("extra_args"),
 
         c.run(function(ctx)
@@ -317,12 +317,20 @@ local function build_app()
       }),
 
       ["action-run"] = c.node({
-        c.arg("file", v.string()),
+        -- `file` is declared optional so that `--help` can reach the handler
+        -- below; clingy validates required-positional minima during parsing
+        -- (parser.lua "Missing required argument"), before any c.run executes,
+        -- and it has no built-in --help short-circuit. Requiredness is enforced
+        -- in the handler instead.
+        c.arg({ key = "file", schema = v.string(), occurs = { min = 0, max = 1 } }),
 
         c.run(function(ctx)
           if ctx.args.help then
             io.stdout:write(app:help("action-run") .. "\n")
             return 0
+          end
+          if not ctx.args.file then
+            process.fail("action-run requires a FILE argument")
           end
           local ok, err = pcall(require("ballad.native_action").run_file, ctx.args.file)
           if not ok then process.fail(tostring(err)) end
@@ -373,4 +381,3 @@ function cli.main(args)
 end
 
 return cli
-

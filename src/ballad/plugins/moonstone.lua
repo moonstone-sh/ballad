@@ -784,7 +784,12 @@ return {
     command = command
       .. " --report " .. process.quote(path.relative(report_path, child_root))
     if #args > 0 then
-      command = command .. " --"
+      -- Two delimiters are required here. Per `moon exec --help`: "One '--'
+      -- after <command> is treated as an argument delimiter and is not
+      -- forwarded; use a second '--' to pass a literal delimiter." `moon orbit
+      -- exec` consumes the first one, so only the second reaches `ballad play`
+      -- as its passthrough separator for c.passthrough("invocation_args").
+      command = command .. " -- --"
       for _, value in ipairs(args) do command = command .. " " .. process.quote(value) end
     end
 
