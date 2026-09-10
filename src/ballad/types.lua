@@ -413,6 +413,7 @@ if _G.PipelineContext then function PipelineContext:use(plugin_ref) end end
 ---@field description string|nil Package description.
 ---@field include string[] Explicit source patterns to archive.
 ---@field exclude string[]|nil Source patterns to omit after selection.
+---@field executable string[]|nil Glob patterns for archived files that must ship with the executable bit; `materialize.collect.bins` entries are always executable and need no entry here.
 ---@field materialize table Moonstone materialization contract.
 ---@field format "tar.gz"|"tar.zst"|nil Defaults to Moonstone-backed `tar.gz`; `tar.zst` is a POSIX legacy route.
 ---@field moon string|nil Moonstone executable used for `artifact create`.

@@ -40,6 +40,7 @@
 ---@field description? string package description
 ---@field include? string[] list of glob patterns for files to include in the source archive
 ---@field exclude? string[] list of glob patterns for files to exclude from the source archive
+---@field executable? string[] glob patterns for archived files that must ship with the executable bit set; entries declared in `materialize.collect.bins` are already executable and need no pattern here
 ---@field readme? string relative path to README file (defaults to REGISTRY_README.md, then README.md in project root)
 ---@field readme_content? string raw README markdown content string
 ---@field origin? table immutable source provenance override ({ kind = "git", url = "https://...", revision? = "..." })
@@ -521,7 +522,8 @@ local function selected_source_files(ctx, input_set, opts)
 	return files
 end
 
-local function copy_source_files(files, staging_dir)
+---@param exec_paths? table<string, boolean> archive-relative paths that must be executable
+local function copy_source_files(files, staging_dir, exec_paths)
 	fs.remove_tree(staging_dir)
 	fs.mkdir(staging_dir)
 	for _, asset in ipairs(files) do
@@ -535,7 +537,12 @@ local function copy_source_files(files, staging_dir)
 		elseif asset.output_path then
 			fs.copy_file(asset.output_path, dest)
 		end
-		if asset.metadata and asset.metadata.executable then
+		-- The tar.zst route archives the staged tree with real `tar`, which reads
+		-- these modes off disk, so the staged file must carry the bit too; the
+		-- tar.gz route passes an explicit mode per entry and does not depend on it.
+		if (exec_paths and rel and exec_paths[rel])
+			or asset.executable
+			or (asset.metadata and asset.metadata.executable) then
 			fs.chmod(dest, "+x")
 		end
 	end
@@ -606,6 +613,56 @@ local function create_tar_gz(ctx, opts, tarball_path, entries)
 		artifact_capability_failure(ctx, moon_bin, result, "unsupported result document")
 	end
 	return document
+end
+
+---Resolve which archive-relative paths must ship with the executable bit set.
+---
+---`materialize.collect.bins` is authoritative: the published descriptor promises
+---each of those entries is a runnable bin, so an archive that stores one 0644
+---produces a package that materializes but cannot exec. `opts.executable` is an
+---optional glob list for files that must also be executable without being bin
+---provisions (release scripts, git hooks, and similar).
+---@param materialize table normalized materialize recipe
+---@param opts table source package options
+---@param files table[] selected source assets
+---@param fail fun(message: string) error reporter
+---@return table<string, boolean> set of archive-relative executable paths
+local function executable_virtual_paths(materialize, opts, files, fail)
+	local exec_paths = {}
+	local collect = materialize and materialize.collect
+	local bins = collect and collect.bins
+	if bins ~= nil then
+		if type(bins) ~= "table" or not is_array(bins) then
+			fail("registry.source_package materialize.collect.bins must be an array")
+		end
+		for _, entry in ipairs(bins) do
+			if type(entry) == "table" then
+				-- `path` is the archive-relative source a bin is collected from;
+				-- `name` is its provision name, which for a source package's bin
+				-- is customarily that same path. Accept either spelling.
+				if type(entry.path) == "string" and entry.path ~= "" then exec_paths[entry.path] = true end
+				if type(entry.name) == "string" and entry.name ~= "" then exec_paths[entry.name] = true end
+			end
+		end
+	end
+
+	local patterns = opts and opts.executable
+	if patterns ~= nil then
+		if type(patterns) ~= "table" or not is_array(patterns) then
+			fail("registry.source_package opts.executable must be an array of glob patterns")
+		end
+		for index, pattern in ipairs(patterns) do
+			if type(pattern) ~= "string" or pattern == "" then
+				fail("registry.source_package opts.executable[" .. tostring(index) .. "] must be a non-empty string")
+			end
+		end
+		for _, asset in ipairs(files or {}) do
+			local rel = asset.virtual_path or asset.source_path or asset.output_path or asset.id
+			if rel and matches_any(rel, patterns) then exec_paths[rel] = true end
+		end
+	end
+
+	return exec_paths
 end
 
 local function sort_archive_entries(ctx, entries)
@@ -1016,7 +1073,8 @@ registry.source_package = function(ctx, inputs, opts)
 		fs.remove_tree(path.dirname(out_dir))
 	end
 	fs.mkdir(out_dir)
-	copy_source_files(files, staging_dir)
+	local exec_paths = executable_virtual_paths(materialize, opts, files, function(message) ctx.fail(message) end)
+	copy_source_files(files, staging_dir, exec_paths)
 
 	print("Creating source registry artifact: " .. tarball_name)
 	local entries = {}
@@ -1025,7 +1083,7 @@ registry.source_package = function(ctx, inputs, opts)
 		entries[#entries + 1] = {
 			virtual_path = rel,
 			source_path = path.join(staging_dir, rel),
-			mode = (asset.executable or (asset.metadata and asset.metadata.executable)) and "0755" or "0644",
+			mode = (exec_paths[rel] or asset.executable or (asset.metadata and asset.metadata.executable)) and "0755" or "0644",
 		}
 	end
 	local blob_hash, blob_bytes
