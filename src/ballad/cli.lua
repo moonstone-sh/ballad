@@ -189,10 +189,10 @@ local function build_app()
   local app
   app = c.create({
     name = "ballad",
-    version = "0.3.7",
+    version = "0.3.9",
     description = "Deterministic Lua project exporter and bundler for Moonstone",
 
-    c.root(c.node({
+    root = c.node({
       c.inherit(
         c.flag({ key = "help", aliases = { "-h", "--help" } })
       ),
@@ -339,7 +339,7 @@ local function build_app()
       }, {
         description = "Execute a serialized native action (watcher internal)",
       }),
-    })),
+    }),
   })
 
   return app
