@@ -189,7 +189,7 @@ local function build_app()
   local app
   app = c.create({
     name = "ballad",
-    version = "0.3.11",
+    version = "0.3.12",
     description = "Deterministic Lua project exporter and bundler for Moonstone",
 
     root = c.node({

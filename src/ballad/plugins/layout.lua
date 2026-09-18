@@ -54,6 +54,32 @@ local function is_default_excluded(relative)
     or relative == "moonstone.lock"
 end
 
+-- Lua (and LuaJIT) checks a version-suffixed env var (`LUA_PATH_5_4`,
+-- `LUA_PATH_5_1`, ...) BEFORE the plain `LUA_PATH`/`LUA_CPATH`, using it
+-- instead whenever it's set at all -- see lua.c/luaconf.h's own
+-- getenv(LUA_PATH_VERSION) lookup. A launcher that exports only the plain
+-- names is silently ignored the moment it runs inside an environment that
+-- already set the suffixed one for some other reason (observed for real:
+-- `moon exec --global` sets LUA_PATH_5_4 for its own project-scoped Lua
+-- modules before invoking this launcher at all, so this launcher's own
+-- carefully-constructed LUA_PATH -- pointing at ITS OWN libexec/src/lua
+-- dirs -- was never even consulted, and every `require()` in the launched
+-- program silently fell through to Lua's compiled-in relative-path
+-- defaults instead). Appended after this launcher's own `export
+-- LUA_PATH=...`/`export LUA_CPATH=...` lines, this propagates whatever
+-- those just computed to every Lua 5.x suffix (not just this launcher's
+-- own declared interpreter/abi -- LuaJIT reports itself as 5.1 regardless
+-- of what a project's moonstone.toml calls it, and covering the whole
+-- 5.1-5.5 family here is cheap and avoids needing to plumb the exact ABI
+-- string through to every one of this file's launcher-generating call
+-- sites just for this).
+local LUA_PATH_VERSION_PROPAGATION = {
+  'for _v in 5_1 5_2 5_3 5_4 5_5; do',
+  '  eval "export LUA_PATH_$_v=\\"\\$LUA_PATH\\""',
+  '  eval "export LUA_CPATH_$_v=\\"\\$LUA_CPATH\\""',
+  'done',
+}
+
 local function lua_path_prefixes(roots)
   local prefixes = {}
   for _, root in ipairs(roots) do
@@ -236,8 +262,9 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
       "fi",
       'export LUA_PATH="' .. lua_path_prefixes(lua_paths) .. ';${LUA_PATH:-};;"',
       'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
-      'exec "$LUA_BIN" "$LIBEXEC/' .. entry .. '" "$@"',
     }
+    for _, line in ipairs(LUA_PATH_VERSION_PROPAGATION) do table.insert(launcher_parts, line) end
+    table.insert(launcher_parts, 'exec "$LUA_BIN" "$LIBEXEC/' .. entry .. '" "$@"')
     local launcher = table.concat(launcher_parts, "\n") .. "\n"
     add_file({ dest = "bin/" .. bin_name, content = launcher, kind = "generated", executable = true })
     add_file({
@@ -319,7 +346,7 @@ local function build_tool_exec_layout(ctx, inputs, opts)
   end
 
   local runtime_name = tool.runtime and tool.runtime.name or "lua"
-  local launcher = table.concat({
+  local launcher_parts = {
     "#!/usr/bin/env sh",
     "set -eu",
     'SELF="$0"',
@@ -340,8 +367,10 @@ local function build_tool_exec_layout(ctx, inputs, opts)
     'export PATH="$LIBEXEC/bin:${PATH:-}"',
     'export LUA_PATH="$LIBEXEC/lua/?.lua;$LIBEXEC/lua/?/init.lua;${LUA_PATH:-};;"',
     'export LUA_CPATH="$LIBEXEC/lib/?.so;$LIBEXEC/lib/?.dylib;$LIBEXEC/lib/?.dll;${LUA_CPATH:-};;"',
-    'exec "$LUA_BIN" "$LIBEXEC/' .. tool_entry .. '" "$@"',
-  }, "\n") .. "\n"
+  }
+  for _, line in ipairs(LUA_PATH_VERSION_PROPAGATION) do table.insert(launcher_parts, line) end
+  table.insert(launcher_parts, 'exec "$LUA_BIN" "$LIBEXEC/' .. tool_entry .. '" "$@"')
+  local launcher = table.concat(launcher_parts, "\n") .. "\n"
   assets:add(ctx.graph:add_asset({
     kind = "generated",
     virtual_path = "bin/" .. bin_name,
@@ -516,7 +545,7 @@ return {
     end
 
     if runnable then
-      local launcher = table.concat({
+      local launcher_parts = {
         "#!/usr/bin/env sh",
         "set -eu",
         'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
@@ -529,8 +558,10 @@ return {
         "fi",
         'export LUA_PATH="$ROOT/lua/?.lua;$ROOT/lua/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;${LUA_PATH:-};;"',
         'export LUA_CPATH="$ROOT/lib/?.so;$ROOT/lib/?.dylib;$ROOT/lib/?.dll;$ROOT/lib/?/?.so;$ROOT/lib/?/?.dylib;$ROOT/lib/?/?.dll;${LUA_CPATH:-};;"',
-        'exec "$LUA_BIN" "$ROOT/' .. entry .. '" "$@"',
-      }, "\n") .. "\n"
+      }
+      for _, line in ipairs(LUA_PATH_VERSION_PROPAGATION) do table.insert(launcher_parts, line) end
+      table.insert(launcher_parts, 'exec "$LUA_BIN" "$ROOT/' .. entry .. '" "$@"')
+      local launcher = table.concat(launcher_parts, "\n") .. "\n"
       assets:add(ctx.graph:add_asset({
         kind = "generated",
         virtual_path = bin_name,
