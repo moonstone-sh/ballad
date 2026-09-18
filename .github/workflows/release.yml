@@ -26,8 +26,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: moonstone-sh/moonstone
-          # Registry artifacts require Moonstone's artifact-create contract.
-          ref: main
+          # Pinned to an explicit SHA, not a floating branch: a `ref: main`
+          # cross-repo checkout here was observed resolving to a month-old
+          # commit despite GitHub's own API reporting main's real HEAD
+          # correctly (a real cross-repo-checkout caching quirk, not
+          # anything in this repo) -- matches the SHA-pinning hydronium's
+          # own CI already uses for the same cross-repo checkout. Bump
+          # this whenever moonstone gains a fix this pipeline needs.
+          ref: ce2b29cc0a3aaf4b5a5e7ce6b9d4f5986e2bf61a
           path: .ci/moonstone
       - uses: mlugg/setup-zig@v2
         with:
