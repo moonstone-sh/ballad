@@ -7,6 +7,39 @@ local conventions = require("ballad.conventions")
 local control_mod = require("ballad.control")
 local diagnostic = require("ballad.diagnostic")
 
+--- Append one NDJSON event to a run's events.ndjson, creating the run
+--- directory if needed. Single point of truth for the event log's on-disk
+--- shape so every call site (native tasks, cache-skip nodes, ordinary
+--- pipeline nodes) writes the same `type`/`kind`/`id`/`timestamp` fields
+--- consistently instead of five slightly different inline copies.
+---@param run_id string
+---@param event table event fields; `timestamp` is filled in if omitted
+---@return boolean ok
+---@return string? err
+local function write_event(run_id, event)
+  local fs = require("ballad.fs")
+  local path = require("ballad.path")
+  local dkjson = require("dkjson")
+  local event_dir = ".ballad/runs/" .. run_id
+  local events_file = path.join(event_dir, "events.ndjson")
+  if not fs.is_dir(event_dir) then
+    fs.mkdir(event_dir)
+  end
+  event.timestamp = event.timestamp or os.date("!%Y-%m-%dT%H:%M:%SZ")
+  local f = io.open(events_file, "a")
+  if not f then
+    return false, "could not open events log for append: " .. events_file
+  end
+  local ok, encoded_or_err = pcall(dkjson.encode, event)
+  if not ok then
+    f:close()
+    return false, "could not encode event: " .. tostring(encoded_or_err)
+  end
+  f:write(encoded_or_err .. "\n")
+  f:close()
+  return true
+end
+
 ---@class NodeHandle
 ---@field _id? string
 ---@field _graph? Graph
@@ -889,21 +922,14 @@ function PipelineContext:native_task(opts)
       missing_outputs = {},
     })
     local run_id = self._run_id or os.date("%Y%m%d-%H%M%S")
-    local events_file = ".ballad/runs/" .. run_id .. "/events.ndjson"
-    local event_dir = require("ballad.path").dirname(events_file)
+    write_event(run_id, {
+      type = "task_failed",
+      kind = "native",
+      id = task_id,
+      stderr = "tool not found: " .. tool,
+    })
     local fs = require("ballad.fs")
-    if not fs.is_dir(event_dir) then fs.mkdir(event_dir) end
-    local file = io.open(events_file, "a")
-    if file then
-      file:write(require("dkjson").encode({
-        type = "task_failed",
-        kind = "native",
-        id = task_id,
-        stderr = "tool not found: " .. tool,
-        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-      }) .. "\n")
-      file:close()
-    end
+    local event_dir = ".ballad/runs/" .. run_id
     fs.write_file(require("ballad.path").join(event_dir, "graph.json"), self._graph:to_json())
     error(
       "Native task failed: tool not found: " .. tool .. "\n\n" ..
@@ -963,33 +989,22 @@ function PipelineContext:native_task(opts)
 
   -- Write event
   local run_id = self._run_id or os.date("%Y%m%d-%H%M%S")
-  local events_file = ".ballad/runs/" .. run_id .. "/events.ndjson"
-  local event_dir = path.dirname(events_file)
-  if not fs.is_dir(event_dir) then
-    fs.mkdir(event_dir)
-  end
-  local f = io.open(events_file, "a")
-  if f then
-    local dkjson = require("dkjson")
-    f:write(dkjson.encode({
-      type = "task_started",
-      kind = "native",
-      id = task_id,
-      tool = tool,
-      timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-    }) .. "\n")
-    f:write(dkjson.encode({
-      type = ok and (#missing_outputs == 0 and "task_finished" or "task_incomplete") or "task_failed",
-      kind = "native",
-      id = task_id,
-      exit_code = exit_code,
-      stdout = stdout_text ~= "" and stdout_text or nil,
-      stderr = stderr_text ~= "" and stderr_text or nil,
-      missing_outputs = #missing_outputs > 0 and missing_outputs or nil,
-      timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-    }) .. "\n")
-    f:close()
-  end
+  local event_dir = ".ballad/runs/" .. run_id
+  write_event(run_id, {
+    type = "task_started",
+    kind = "native",
+    id = task_id,
+    tool = tool,
+  })
+  write_event(run_id, {
+    type = ok and (#missing_outputs == 0 and "task_finished" or "task_incomplete") or "task_failed",
+    kind = "native",
+    id = task_id,
+    exit_code = exit_code,
+    stdout = stdout_text ~= "" and stdout_text or nil,
+    stderr = stderr_text ~= "" and stderr_text or nil,
+    missing_outputs = #missing_outputs > 0 and missing_outputs or nil,
+  })
 
   -- Fail if needed
   if not ok or #missing_outputs > 0 then
@@ -1105,23 +1120,13 @@ function PipelineContext:_native_task_deferred(opts, cache_key)
 
   -- Write task_started event
   local run_id = self._run_id or os.date("%Y%m%d-%H%M%S")
-  local events_file = ".ballad/runs/" .. run_id .. "/events.ndjson"
-  local event_dir = path.dirname(events_file)
-  if not fs.is_dir(event_dir) then
-    fs.mkdir(event_dir)
-  end
-  local f = io.open(events_file, "a")
-  if f then
-    f:write(dkjson.encode({
-      type = "task_started",
-      kind = "native",
-      id = task_id,
-      tool = tool,
-      worker = 1,
-      timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-    }) .. "\n")
-    f:close()
-  end
+  write_event(run_id, {
+    type = "task_started",
+    kind = "native",
+    id = task_id,
+    tool = tool,
+    worker = 1,
+  })
 
   local assets = graph_mod.AssetSet.new()
   for _, out in ipairs(outputs) do
@@ -1162,12 +1167,9 @@ function PipelineContext:_flush_pending_tasks()
   if #self._pending_tasks == 0 then return end
 
   local native_runner = require("ballad.native_runner")
-  local path = require("ballad.path")
   local fs = require("ballad.fs")
-  local dkjson = require("dkjson")
   local cache = require("ballad.cache")
   local run_id = self._run_id or os.date("%Y%m%d-%H%M%S")
-  local events_file = ".ballad/runs/" .. run_id .. "/events.ndjson"
 
   local pending = {}
   for _, t in ipairs(self._pending_tasks) do
@@ -1202,20 +1204,15 @@ function PipelineContext:_flush_pending_tasks()
         end
 
         -- Write event
-        local f = io.open(events_file, "a")
-        if f then
-          f:write(dkjson.encode({
-            type = (result.exit_code == 0) and "task_finished" or "task_failed",
-            kind = "native",
-            id = task.task_id,
-            exit_code = result.exit_code,
-            stdout = result.stdout ~= "" and result.stdout or nil,
-            stderr = result.stderr ~= "" and result.stderr or nil,
-            worker = 1,
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-          }) .. "\n")
-          f:close()
-        end
+        write_event(run_id, {
+          type = (result.exit_code == 0) and "task_finished" or "task_failed",
+          kind = "native",
+          id = task.task_id,
+          exit_code = result.exit_code,
+          stdout = result.stdout ~= "" and result.stdout or nil,
+          stderr = result.stderr ~= "" and result.stderr or nil,
+          worker = 1,
+        })
 
         -- Fail if needed
         if result.exit_code ~= 0 then
@@ -1717,23 +1714,20 @@ function Pipeline:execute()
         end
 
         -- Write skipped event
-        local events_file = ".ballad/runs/" .. run_id .. "/events.ndjson"
-        local f = io.open(events_file, "a")
-        if f then
-          f:write(dkjson.encode({
-            type = "task_skipped",
-            kind = "node",
-            id = node_id,
-            reason = "cache_hit",
-            plugin = node.plugin,
-            method = node.method,
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-          }) .. "\n")
-          f:close()
-        end
+        write_event(run_id, {
+          type = "task_skipped",
+          kind = "node",
+          id = node_id,
+          reason = "cache_hit",
+          plugin = node.plugin,
+          method = node.method,
+        })
 
         print("Cache hit: " .. node_id .. " (" .. node.plugin .. "." .. node.method .. ")")
         self._graph:set_node_result(node_id, cached_result)
+        if coroutine.isyieldable() then
+          coroutine.yield()
+        end
         goto continue
         end
       end
@@ -1763,17 +1757,55 @@ function Pipeline:execute()
     self._context._metadata._current_method = node.method
     self._context._metadata._current_control_conditions = node.control_conditions or {}
 
+    write_event(run_id, {
+      type = "task_started",
+      kind = "node",
+      id = node_id,
+      plugin = node.plugin,
+      method = node.method,
+    })
+    local node_started_at = os.clock()
+
     local ok, result = pcall(handler, ctx, input_results, node.options)
+    local node_duration_ms = (os.clock() - node_started_at) * 1000
     if not ok then
+      write_event(run_id, {
+        type = "task_failed",
+        kind = "node",
+        id = node_id,
+        plugin = node.plugin,
+        method = node.method,
+        error = diagnostic.is(result) and diagnostic.render(result) or tostring(result),
+        duration_ms = node_duration_ms,
+      })
       write_debug_graph()
       if diagnostic.is(result) then error(result, 0) end
       error("Pipeline node " .. node_id .. " (" .. node.plugin .. "." .. node.method .. ") failed: " .. tostring(result))
     end
 
     if result and getmetatable(result) ~= graph_mod.AssetSet then
+      write_event(run_id, {
+        type = "task_failed",
+        kind = "node",
+        id = node_id,
+        plugin = node.plugin,
+        method = node.method,
+        error = "did not return an AssetSet",
+        duration_ms = node_duration_ms,
+      })
       write_debug_graph()
       error("Node " .. node_id .. " did not return an AssetSet")
     end
+
+    write_event(run_id, {
+      type = "task_finished",
+      kind = "node",
+      id = node_id,
+      plugin = node.plugin,
+      method = node.method,
+      duration_ms = node_duration_ms,
+      asset_count = result and result.assets and #result.assets or 0,
+    })
 
     self._graph:set_node_result(node_id, result)
 
@@ -1802,6 +1834,21 @@ function Pipeline:execute()
       cache.store(key, result, outputs)
     end
 
+    -- Cooperative checkpoint for a caller that wrapped this whole call in a
+    -- coroutine (e.g. `hydronium build`'s in-process consumer, which needs
+    -- to redraw between nodes without ballad knowing anything about UI).
+    -- A no-op for every existing caller: `p:execute()` from ballad's own
+    -- cli.lua and from partiture.load's other consumers runs on the main
+    -- coroutine, where coroutine.isyieldable() is false, so this never
+    -- yields there and behavior is unchanged. Placed immediately before the
+    -- loop's trailing label (not after it) -- Lua only allows `goto
+    -- continue` to jump into an already-open local's scope when the label
+    -- is the LAST statement of the block; a statement after it turns that
+    -- into a compile error (see the cache-hit branch's own `goto continue`
+    -- above, which reaches this same checkpoint via its own call just below).
+    if coroutine.isyieldable() then
+      coroutine.yield()
+    end
     ::continue::
   end
 

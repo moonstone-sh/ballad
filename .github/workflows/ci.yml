@@ -44,6 +44,7 @@ jobs:
         run: |
           moon exec sh -c '
             set -eu
+            ./tests/test_pipeline_progress_events.sh
             ./tests/test_layout_exec.sh
             ./tests/test_windows_portability.sh
             ./tests/test_windows_watcher_bridge.sh
