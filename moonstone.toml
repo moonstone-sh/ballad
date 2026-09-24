@@ -2,7 +2,7 @@ manifest_version = 2
 
 [package]
 name = "moonstone/ballad"
-version = "0.3.14"
+version = "0.3.15"
 kind = "script"
 description = "Deterministic Lua project exporter and bundler for Moonstone"
 
