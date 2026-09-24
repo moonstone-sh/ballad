@@ -7,10 +7,12 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 mkdir -p "$WORK_DIR/project/src/core" "$WORK_DIR/project/generated"
 mkdir -p "$WORK_DIR/project/src/package"
+mkdir -p "$WORK_DIR/project/types"
 printf '%s\n' 'return {}' > "$WORK_DIR/project/src/package.lua"
 printf '%s\n' 'return {}' > "$WORK_DIR/project/src/package/internal.lua"
 printf '%s\n' 'return {}' > "$WORK_DIR/project/src/core/init.lua"
 printf '%s\n' 'ignored' > "$WORK_DIR/project/src/core/debug.tmp"
+printf '%s\n' '---@class PackageOptions' > "$WORK_DIR/project/types/package.d.lua"
 
 LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH BALLAD_CONVENTIONS_FIXTURE="$WORK_DIR/project"
@@ -32,6 +34,9 @@ local options = conventions.source_package(project, {
   include = caller_include,
   include_add = { "README.md" },
   collect = {
+    assets = {
+      conventions.tree("types", { prefix = "types" }),
+    },
     lua_modules = {
       conventions.tree("src", {
         prefix = "package",
@@ -61,6 +66,7 @@ assert(modules[2].name == "package/core/init.lua" and modules[2].path == "src/co
 assert(modules[3].name == "package/internal.lua" and modules[3].path == "src/package/internal.lua")
 assert(options.materialize.external_paths[1].variable == "SQLITE_INCDIR")
 assert(options.materialize.external_paths[2].variable == "SQLITE_LIBDIR")
+assert(options.materialize.collect.assets[1].name == "types/package.d.lua")
 
 local ok, diagnostic = pcall(function()
   conventions.source_package(project, {
@@ -71,6 +77,21 @@ local ok, diagnostic = pcall(function()
   })
 end)
 assert(not ok and tostring(diagnostic):match("duplicate provision same.lua"), tostring(diagnostic))
+
+ok, diagnostic = pcall(function()
+  conventions.source_package(project, {
+    collect = {
+      assets = { conventions.file("shared", "types/package.d.lua") },
+      lua_modules = { conventions.file("shared", "src/package.lua") },
+    },
+  })
+end)
+assert(not ok and tostring(diagnostic):match("duplicate destination shared"), tostring(diagnostic))
+
+ok, diagnostic = pcall(function()
+  conventions.source_package(project, { collect = { unknown = {} } })
+end)
+assert(not ok and tostring(diagnostic):match("collect.unknown is unsupported"), tostring(diagnostic))
 
 ok, diagnostic = pcall(function()
   conventions.source_package(project, {

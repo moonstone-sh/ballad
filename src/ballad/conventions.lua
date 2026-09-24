@@ -212,7 +212,19 @@ end
 
 local function expand_collect(collect, project_root)
   local result = {}
+  local supported = {
+    lua_cmodules = true,
+    lua_modules = true,
+    bins = true,
+    headers = true,
+    native_lib = true,
+    assets = true,
+  }
+  local destinations = {}
   for category, declarations in pairs(collect or {}) do
+    if not supported[category] then
+      fail("collect." .. tostring(category) .. " is unsupported; use lua_cmodules, lua_modules, bins, headers, native_lib, or assets")
+    end
     if type(declarations) ~= "table" then fail("collect." .. tostring(category) .. " must be an array") end
     local entries = {}
     local names = {}
@@ -230,7 +242,12 @@ local function expand_collect(collect, project_root)
           fail("collect." .. tostring(category) .. " produces duplicate provision " .. entry.name
             .. " from " .. names[entry.name] .. " and " .. entry.path)
         end
+        if destinations[entry.name] then
+          fail("collect produces duplicate destination " .. entry.name
+            .. " from " .. destinations[entry.name] .. " and " .. category)
+        end
         names[entry.name] = entry.path
+        destinations[entry.name] = category
         entries[#entries + 1] = entry
       end
     end
