@@ -784,12 +784,12 @@ return {
     command = command
       .. " --report " .. process.quote(path.relative(report_path, child_root))
     if #args > 0 then
-      -- Two delimiters are required here. Per `moon exec --help`: "One '--'
-      -- after <command> is treated as an argument delimiter and is not
-      -- forwarded; use a second '--' to pass a literal delimiter." `moon orbit
-      -- exec` consumes the first one, so only the second reaches `ballad play`
-      -- as its passthrough separator for c.passthrough("invocation_args").
-      command = command .. " -- --"
+      -- `moon orbit exec <orbit> --` has already consumed its command
+      -- separator above. Everything that follows is passed straight to the
+      -- child command, so Ballad needs exactly one separator for its own
+      -- invocation arguments. A second one becomes a spurious first argument
+      -- in the child's partiture.
+      command = command .. " --"
       for _, value in ipairs(args) do command = command .. " " .. process.quote(value) end
     end
 
