@@ -222,6 +222,35 @@ local function dependency_entries_from(raw_deps)
 	return entries
 end
 
+--- Names of the exporting project's own orbit members.
+---
+--- A workspace member resolves locally by membership, so its dependency line
+--- carries no path: or link: prefix to strip -- it is already `name` plus a
+--- constraint. That is the point of workspace resolution: the same manifest
+--- means "the sibling directory" inside the workspace and "a registry
+--- package" once published, with nothing to scrub in between.
+---
+--- The one thing that does NOT survive that trip is a missing constraint. `*`
+--- is a perfectly reasonable internal relationship and a meaningless
+--- published contract, so it is rejected at the boundary rather than emitted.
+---@param project_root string
+---@param opts table
+---@return table<string, boolean>
+local function workspace_member_names(project_root, opts)
+	local names = {}
+	local ok, loaded = pcall(project_mod.load_manifest, project_root, opts or {})
+	if not ok or not loaded or not loaded.manifest then return names end
+	for _, member in ipairs(loaded.manifest.orbits or {}) do
+		local member_root = path.join(project_root, member.path or "")
+		local mok, mloaded = pcall(project_mod.load_manifest, member_root, opts or {})
+		if mok and mloaded and mloaded.manifest and mloaded.manifest.package then
+			local nm = mloaded.manifest.package.name
+			if type(nm) == "string" and nm ~= "" then names[nm] = true end
+		end
+	end
+	return names
+end
+
 local function normalize_release_dependency(ctx, dependency, project_root, opts)
 	local role = dependency.role == "external" and "peer" or dependency.role
 	if not RELEASE_DEPENDENCY_ROLES[role] then return nil end
@@ -264,6 +293,17 @@ local function normalize_release_dependency(ctx, dependency, project_root, opts)
 		end
 		resolver, constraint = "moonstone", "^" .. package.version
 	end
+	-- A dependency on one of this project's own workspace members must carry a
+	-- real external constraint. Inside the workspace it resolves by membership
+	-- and `*` is harmless; published, `*` would tell a consumer nothing about
+	-- which version it actually needs.
+	if constraint == "*" and workspace_member_names(project_root or ".", opts)[dependency.name] then
+		ctx.fail("registry release dependency " .. dependency.name
+			.. " is a workspace member with no version constraint. Membership locates it inside the"
+			.. " workspace, but a published descriptor needs a constraint a consumer can resolve --"
+			.. " declare one, e.g. constraint = \"^<version>\".")
+	end
+
 	return { role = role, registry = resolver or "moonstone", name = dependency.name, constraint = constraint }
 end
 
@@ -1415,5 +1455,10 @@ registry.runtime = function(ctx, inputs, opts)
 	}))
 	return assets
 end
+
+--- Exposed for tests only. The export gate is where a workspace-local
+--- relationship becomes a portable one, and that transformation is worth
+--- pinning directly rather than only through a full registry export.
+registry.__normalize_release_dependency = normalize_release_dependency
 
 return registry
