@@ -291,7 +291,10 @@ local function normalize_release_dependency(ctx, dependency, project_root, opts)
 		if type(package.version) ~= "string" or package.version == "" then
 			ctx.fail("registry release dependency " .. dependency.name .. " path " .. local_path .. " has no publishable version")
 		end
-		resolver, constraint = "moonstone", "^" .. package.version
+		-- A workspace edge becomes an edge to the registry that publishes this
+		-- package. `moonstone` is a registry identity, not a generic protocol
+		-- marker: hard-coding it here makes third-party registries unreachable.
+		resolver, constraint = opts.local_dependency_registry or "moonstone", "^" .. package.version
 	end
 	-- A dependency on one of this project's own workspace members must carry a
 	-- real external constraint. Inside the workspace it resolves by membership
@@ -311,6 +314,12 @@ local function release_dependencies(ctx, inputs, opts, fallback_metadata)
 	local project_asset = project_asset_from_inputs(inputs)
 	local project_metadata = project_asset and project_asset.metadata or nil
 	local metadata = project_metadata or fallback_metadata or {}
+	if not opts.local_dependency_registry and metadata.registry_name then
+		local inherited = {}
+		for key, value in pairs(opts) do inherited[key] = value end
+		inherited.local_dependency_registry = metadata.registry_name
+		opts = inherited
+	end
 	local raw_deps = opts.dependencies
 		or (project_metadata and project_metadata.dependencies)
 		or (fallback_metadata and fallback_metadata.dependencies)

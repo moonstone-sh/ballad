@@ -5,7 +5,7 @@ BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-source-package.XXXXXX)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-mkdir -p "$WORK_DIR/src" "$WORK_DIR/native" "$WORK_DIR/.moonstone/env" "$WORK_DIR/zig-out" "$WORK_DIR/fake-bin"
+mkdir -p "$WORK_DIR/bin" "$WORK_DIR/src" "$WORK_DIR/native" "$WORK_DIR/.moonstone/env" "$WORK_DIR/zig-out" "$WORK_DIR/fake-bin"
 mkdir -p "$WORK_DIR/runtime"
 cat > "$WORK_DIR/moonstone.toml" <<'TOML'
 [package]
@@ -39,6 +39,13 @@ LUA
 cat > "$WORK_DIR/native/module.zig" <<'ZIG'
 pub export fn luaopen_meteorite_native() c_int { return 0; }
 ZIG
+cat > "$WORK_DIR/bin/meteorite" <<'SH'
+#!/usr/bin/env sh
+exec lua src/app.lua "$@"
+SH
+# Deliberately leave the source file non-executable. The bins collection is
+# authoritative and must make the archived entry executable.
+chmod 0644 "$WORK_DIR/bin/meteorite"
 printf 'secret\n' > "$WORK_DIR/.moonstone/secret"
 cat > "$WORK_DIR/.moonstone/env/env.toml" <<'TOML'
 [runtime]
@@ -103,6 +110,7 @@ return ballad.partiture(function(p)
     include = {
       "moonstone.toml",
       "build.zig",
+      "bin/**",
       "src/**",
       "native/**",
     },
@@ -122,6 +130,9 @@ return ballad.partiture(function(p)
       },
       ldflags = { "-L$(SQLITE_LIBDIR)" },
       collect = {
+        bins = {
+          { name = "bin/meteorite", path = "bin/meteorite" },
+        },
         lua_modules = {
           { name = "meteorite.lua", path = "src/app.lua" },
         },
@@ -171,7 +182,9 @@ fi
 grep -q 'kind must be include or library' "$WORK_DIR/run-invalid-external.log" || { cat "$WORK_DIR/run-invalid-external.log"; echo "FAIL: invalid external path diagnostic missing"; exit 1; }
 
 tar -tzf dist/registry/meteorite/meteorite-1.2.3-source.tar.gz > "$WORK_DIR/tar-list.txt"
+tar -tvzf dist/registry/meteorite/meteorite-1.2.3-source.tar.gz > "$WORK_DIR/tar-detail.txt"
 grep -Eq '^\.?/?moonstone.toml$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: moonstone.toml not archived"; cat "$WORK_DIR/tar-list.txt"; exit 1; }
+grep -Eq '^-rwxr-xr-x.* (\./)?bin/meteorite$' "$WORK_DIR/tar-detail.txt" || { echo "FAIL: declared bin lost executable mode"; cat "$WORK_DIR/tar-detail.txt"; exit 1; }
 grep -Eq '^\.?/?src/app.lua$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: src/app.lua not archived"; exit 1; }
 grep -Eq '^\.?/?native/module.zig$' "$WORK_DIR/tar-list.txt" || { echo "FAIL: native/module.zig not archived"; exit 1; }
 if grep -q '^\.moonstone/' "$WORK_DIR/tar-list.txt" || grep -q '^zig-out/' "$WORK_DIR/tar-list.txt"; then
