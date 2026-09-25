@@ -42,7 +42,7 @@ jobs:
         run: moon sync
       - name: Validate Ballad and export itself
         run: |
-          moon exec sh -c '
+          moon exec -- sh -c '
             set -eu
             ./tests/test_pipeline_progress_events.sh
             ./tests/test_layout_exec.sh
