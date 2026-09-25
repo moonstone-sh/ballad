@@ -33,7 +33,7 @@ jobs:
           # anything in this repo) -- matches the SHA-pinning hydronium's
           # own CI already uses for the same cross-repo checkout. Bump
           # this whenever moonstone gains a fix this pipeline needs.
-          ref: b23018c33377d05f42caaa2fa1c0a7fadb117687
+          ref: 4e9f979a4b64189aa7b19c65c9eb771d4eeb73dd
           path: .ci/moonstone
       - uses: mlugg/setup-zig@v2
         with:
