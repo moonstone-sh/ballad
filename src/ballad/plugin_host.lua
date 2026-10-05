@@ -12,6 +12,7 @@ local project_mod = require("ballad.project")
 ---@field inputs string[]
 ---@field outputs string[]
 ---@field cacheable boolean
+---@field cache_scope? "native" keep caching inside the method's native task
 ---@field parallel_safe boolean
 
 ---@class PluginContract

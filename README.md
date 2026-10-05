@@ -348,6 +348,11 @@ source closure, and named products. A later matching invocation folds that
 observed closure back into its cache inputs, so source-domain changes invalidate
 the child export without making its runtime or tool scope part of the parent.
 
+Declare directory inputs such as `inputs = { "src/**" }` to detect new files
+as well as edits to previously observed sources. Every invocation checks that
+inventory before consulting the native export cache; `cacheable = false`
+disables reuse of that export task.
+
 When a source-tree recipe needs an additional **pure-Lua** plugin, declare its
 parent-contained root explicitly with `lua_paths` and include that source in
 the node inputs. Ballad passes those roots to the child `ballad play` process;

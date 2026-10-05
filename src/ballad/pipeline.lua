@@ -252,7 +252,9 @@ function PluginProxy.new(name, graph, host, pipeline_ctx, contract)
         end
       end
       local node_cacheable = method_contract.cacheable
-      if options.cacheable ~= nil then node_cacheable = options.cacheable end
+      if options.cacheable ~= nil and method_contract.cache_scope ~= "native" then
+        node_cacheable = options.cacheable
+      end
       local node = graph:add_node({
         plugin = name,
         method = method_name,

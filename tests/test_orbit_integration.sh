@@ -96,6 +96,7 @@ return ballad.partiture(function(p)
   local child = moonstone.orbit("child"):partiture("partiture.lua"):run({
     sync = "never",
     inputs = { "moonstone.toml", "partiture.lua", "input/**", "../plugins/**" },
+    cacheable = true,
     lua_paths = { "../plugins" },
     args = { "--profile", "test" },
   })
@@ -133,9 +134,40 @@ grep -q '"--profile"' "$report"
   exit 1
 }
 grep -R -q 'child/input/hello.txt' "$WORK_DIR/.ballad/runs"
+run_observed() {
+  "${LUA_BIN:-luajit}" "$BALLAD_ROOT/src/main.lua" play parent-observed.lua > "$WORK_DIR/observed.log" 2>&1 || {
+    cat "$WORK_DIR/observed.log"
+    exit 1
+  }
+}
+# Warm the native cache after the first report supplies observed inputs.
+run_observed
+run_observed
+grep -q 'Cache hit: native task (export orbit child' "$WORK_DIR/observed.log"
+printf 'edited export\n' > "$WORK_DIR/child/input/hello.txt"
+run_observed
+grep -q 'edited export' "$WORK_DIR/parent-observed-dist/orbits/child/dist/hello.txt"
+mkdir -p "$WORK_DIR/child/input/nested"
+printf 'new export\n' > "$WORK_DIR/child/input/nested/added.txt"
+run_observed
+grep -q 'new export' "$WORK_DIR/parent-observed-dist/orbits/child/dist/nested/added.txt"
+if grep -q 'Cache hit: native task (export orbit child' "$WORK_DIR/observed.log"; then
+  echo "FAIL: adding a glob input reused the orbit task" >&2
+  exit 1
+fi
+rm "$WORK_DIR/child/input/nested/added.txt"
+run_observed
+if grep -q 'Cache hit: native task (export orbit child' "$WORK_DIR/observed.log"; then
+  echo "FAIL: deleting a glob input reused the orbit task" >&2
+  exit 1
+fi
+if grep -q 'nested/added.txt' "$report"; then
+  echo "FAIL: deleted input remains in the child product report" >&2
+  exit 1
+fi
 if "${LUA_BIN:-luajit}" "$BALLAD_ROOT/src/main.lua" play parent-unselected.lua > "$WORK_DIR/unselected.log" 2>&1; then
   echo "FAIL: unselected orbit export was accepted" >&2
   exit 1
 fi
 grep -q 'cannot consume an unselected moonstone.orbit export' "$WORK_DIR/unselected.log"
-echo "PASS: moonstone.orbit selects explicit child products"
+echo "PASS: moonstone.orbit selects products and invalidates edited, added and deleted inputs"
