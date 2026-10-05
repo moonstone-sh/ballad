@@ -139,7 +139,12 @@ function cache.compute_native_key(opts, plugin_name, method_name)
     if type(inp) == "string" then
       if inp:find("%*") then
         local glob_pat = glob_to_pattern(inp)
-        local files = fs.list_files(".")
+        -- Orbit inputs are absolute; enumerate their fixed directory prefix
+        -- rather than comparing an absolute glob with relative project paths.
+        local prefix = inp:match("^(.-)[*]") or ""
+        local base = prefix:match("^(.*)/") or "."
+        if base == "" then base = "/" end
+        local files = fs.list_files(base)
         for _, f in ipairs(files) do
           local rel = f:gsub("^%./", "")
           if rel:match(glob_pat) or f:match(glob_pat) then

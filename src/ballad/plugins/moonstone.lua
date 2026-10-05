@@ -479,7 +479,9 @@ return {
     orbit = {
       inputs = {},
       outputs = { "asset_set" },
-      cacheable = true,
+      -- Re-evaluate the child inventory before consulting the native task cache.
+      cacheable = false,
+      cache_scope = "native",
       parallel_safe = false,
     },
     registry_package = {
