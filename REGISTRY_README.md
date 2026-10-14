@@ -140,7 +140,7 @@ examples for CLI exports, orbit composition, and release closures.
 
 ## Preserve unchanged build output
 
-Ballad 0.4.4 supports incremental output for a dedicated generated directory:
+Ballad 0.4.5 supports incremental output for a dedicated generated directory:
 
 ```lua
 p.sink.directory(assets, { out = "dist/client", incremental = true })
