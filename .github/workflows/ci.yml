@@ -1,6 +1,7 @@
 name: Ballad CI
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches: [main]
@@ -44,6 +45,7 @@ jobs:
         run: |
           moon exec -- sh -c '
             set -eu
+            ./tests/test_incremental.sh
             ./tests/test_pipeline_progress_events.sh
             ./tests/test_layout_exec.sh
             ./tests/test_windows_portability.sh

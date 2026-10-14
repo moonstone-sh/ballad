@@ -137,3 +137,15 @@ Use Ballad's layout, registry, watcher, native-task, and orbit APIs to compose
 larger releases deliberately. The repository `README.md` documents the full
 partiture API and development workflow; the Moonstone docs provide guided
 examples for CLI exports, orbit composition, and release closures.
+
+## Preserve unchanged build output
+
+Ballad 0.4.4 supports incremental output for a dedicated generated directory:
+
+```lua
+p.sink.directory(assets, { out = "dist/client", incremental = true })
+```
+
+Unchanged files retain their timestamps; removed assets are pruned. The sink
+owns the entire output directory, so keep handwritten files outside it. Native
+task caches also verify output contents and input file membership before reuse.

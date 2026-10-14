@@ -1271,16 +1271,8 @@ function PipelineContext:_flush_pending_tasks()
   end
 end
 
-local function glob_to_pattern(glob)
-  local pattern = tostring(glob):gsub("([%.%+%-%^%$%(%)%%])", "%%%1")
-  pattern = pattern:gsub("%*%*/", ".-/")
-  pattern = pattern:gsub("%*%*", ".-")
-  pattern = pattern:gsub("%*", "[^/]*")
-  return "^" .. pattern .. "$"
-end
-
 local function glob_match(value, glob)
-  return tostring(value):match(glob_to_pattern(glob)) ~= nil
+  return require("ballad.glob").matches(value, glob)
 end
 
 local function collect_input_assets(input_results)
@@ -1296,20 +1288,27 @@ local function collect_input_assets(input_results)
   return assets
 end
 
-local function write_asset_to_directory(fs, path, asset, out_dir)
+local function write_asset_to_directory(fs, path, asset, out_dir, incremental)
   local rel = asset.virtual_path or asset.output_path or asset.source_path or asset.id
   rel = rel:gsub("^/", "")
   local dest = path.join(out_dir, rel)
-  if asset.generated and asset.content then
+  if asset.content ~= nil then
     fs.mkdir(path.dirname(dest))
-    fs.write_file(dest, asset.content)
+    if not incremental or fs.read_file(dest) ~= asset.content then
+      fs.write_file(dest, asset.content)
+    end
   elseif asset.source_path then
-    fs.copy_file(asset.source_path, dest)
+    local content = incremental and fs.read_file(asset.source_path)
+    if incremental and content == nil then error("cannot read sink source: " .. asset.source_path) end
+    if not incremental or fs.read_file(dest) ~= content then
+      fs.copy_file(asset.source_path, dest)
+    end
   elseif asset.output_path and asset.output_path ~= dest then
-    fs.copy_file(asset.output_path, dest)
-  elseif asset.content then
-    fs.mkdir(path.dirname(dest))
-    fs.write_file(dest, asset.content)
+    local content = incremental and fs.read_file(asset.output_path)
+    if incremental and content == nil then error("cannot read sink source: " .. asset.output_path) end
+    if not incremental or fs.read_file(dest) ~= content then
+      fs.copy_file(asset.output_path, dest)
+    end
   end
   if asset.metadata and asset.metadata.executable then
     fs.chmod(dest, "+x")
@@ -1451,14 +1450,20 @@ local function core_handler(plugin, method)
     if method == "directory" then
       return function(ctx, input_results, opts)
         local out_dir = opts.out or opts.path or "dist/ballad"
-        fs.remove_tree(out_dir)
-        fs.mkdir(out_dir)
         local input_assets = collect_input_assets(input_results)
+        if opts.incremental then
+          require("ballad.directory_sink").prepare(out_dir, input_assets.assets, opts.file_graph)
+        else
+          fs.remove_tree(out_dir)
+          fs.mkdir(out_dir)
+        end
         for _, asset in ipairs(input_assets.assets) do
-          write_asset_to_directory(fs, path, asset, out_dir)
+          write_asset_to_directory(fs, path, asset, out_dir, opts.incremental)
         end
         if opts.file_graph then
-          fs.write_file(path.join(out_dir, "file-graph.json"), dkjson.encode(file_graph_for(input_results)) .. "\n")
+          local filename = path.join(out_dir, "file-graph.json")
+          local content = dkjson.encode(file_graph_for(input_results)) .. "\n"
+          if not opts.incremental or fs.read_file(filename) ~= content then fs.write_file(filename, content) end
         end
         local result = graph_mod.AssetSet.new()
         result:add(ctx.graph:add_asset({ kind = "sink", virtual_path = out_dir, output_path = out_dir, generated = true, metadata = { kind = "directory", count = input_assets:count() } }))
