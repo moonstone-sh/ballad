@@ -1,4 +1,5 @@
 local deps = {}
+local flavor = require("ballad.flavor")
 
 ---Extract require(...) calls from Lua source text.
 ---Handles: require("mod"), require 'mod', require([[mod]])
@@ -52,12 +53,13 @@ function deps.classify(mod, internal_modules, dependency_map)
 end
 
 ---Build a set of internal modules from a list of exported Lua file paths.
+---Flavor variants (`lua/my_plugin/fs@lua54.lua`) count as their module (`my_plugin.fs`).
 ---@param lua_files string[] list of relative paths like "lua/my_plugin/init.lua"
 ---@return table<string, boolean> module names
 function deps.build_internal_modules(lua_files)
   local modules = {}
   for _, rel in ipairs(lua_files) do
-    local mod = rel:gsub("^lua/", ""):gsub("/init%.lua$", ""):gsub("/", "."):gsub("%.lua$", "")
+    local mod = flavor.module_file(rel):gsub("^lua/", ""):gsub("/init%.lua$", ""):gsub("/", "."):gsub("%.lua$", "")
     modules[mod] = true
   end
   return modules
