@@ -61,6 +61,8 @@ return ballad.partiture(function(p)
     name = "ballad",
     entry = "src/main.lua",
     include = { "src/**" },
+    -- Moonstone artifacts reject `@` in paths; see docs/LUA_FLAVORS.md.
+    exclude = { "src/**@*.lua" },
   })
   local registry_artifact = moonstone.registry.package(app, {
     name = project.registry_name or "moonstone/ballad",

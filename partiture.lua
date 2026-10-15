@@ -16,6 +16,13 @@ return ballad.partiture(function(p)
 		include = {
 			"src/**",
 		},
+		-- Flavor variants (`src/ballad/crc32@luajit.lua`) stay out of the
+		-- package for now: Moonstone's artifact writer accepts only
+		-- [A-Za-z0-9._-] in archive paths and rejects them. Their untagged
+		-- fallbacks run on every Lua. See docs/LUA_FLAVORS.md.
+		exclude = {
+			"src/**@*.lua",
+		},
 	})
 
 	local registry_artifact = moonstone.registry.package(app, {
