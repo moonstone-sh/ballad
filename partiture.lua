@@ -17,9 +17,10 @@ return ballad.partiture(function(p)
 			"src/**",
 		},
 		-- Flavor variants (`src/ballad/crc32@luajit.lua`) stay out of the
-		-- package for now: Moonstone's artifact writer accepts only
-		-- [A-Za-z0-9._-] in archive paths and rejects them. Their untagged
-		-- fallbacks run on every Lua. See docs/LUA_FLAVORS.md.
+		-- package for now: Moonstone accepts `@` in artifact paths only from
+		-- 0.6.0, and a project that bundles Ballad with an older Moonstone
+		-- would fail to package them. Their untagged fallbacks run on every
+		-- Lua. See docs/LUA_FLAVORS.md.
 		exclude = {
 			"src/**@*.lua",
 		},

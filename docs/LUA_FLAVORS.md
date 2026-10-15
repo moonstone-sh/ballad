@@ -59,12 +59,12 @@ installed as a searcher. A Moonstone tool runs from its own `libexec` copy,
 which `moon sync` does not project, so the installed Ballad tool also uses the
 fallback. The variants pay off only where Ballad is a projected dependency.
 
-**Not packaged yet.** Moonstone's artifact writer
-(`src/core/archive/canonical_artifact.zig`, `isPortableNameByte`) accepts only
-`[A-Za-z0-9._-]` in archive paths, on the `feat/lua-flavors` branch as well,
-and fails `moon artifact create` with `InvalidVirtualPath` for any `@` file.
-`partiture.lua` therefore excludes `src/**@*.lua`. Remove that exclude once
-Moonstone accepts variant names in artifacts.
+**Not packaged yet.** Moonstone accepts `@` in artifact paths from 0.6.0.
+Earlier versions fail `moon artifact create` with `InvalidVirtualPath`, and a
+project that bundles Ballad's modules into its own artifact (a tool built with
+`layout.exec`) would hit that with an older Moonstone. `partiture.lua`
+therefore still excludes `src/**@*.lua`; drop the exclude once consumers are
+expected to run Moonstone 0.6.0 or later.
 
 ## Requests for plugins that specialize per flavor (Quaver)
 
