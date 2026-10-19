@@ -93,4 +93,4 @@ print("PASS: ordinary pipeline nodes emit events and checkpoint for coroutine co
 LUA
 
 cd "$WORK_DIR"
-LUA_PATH="$ROOT/src/?.lua;$ROOT/src/?/init.lua;${LUA_PATH:-}" "${LUA_BIN:-luajit}" test.lua
+LUA_PATH="$ROOT/src/?.lua;$ROOT/src/?/init.lua;${LUA_PATH:-}" "${LUA_BIN:-lua}" test.lua

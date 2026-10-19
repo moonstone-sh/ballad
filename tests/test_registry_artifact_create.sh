@@ -61,10 +61,10 @@ SH
 done
 
 cd "$WORK_DIR"
-LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
 PATH="$WORK_DIR/fake-bin:$PATH" MOONSTONE_CLI="$WORK_DIR/fake-bin/moon" ARTIFACT_LOG="$WORK_DIR/artifact-args.log" \
-  luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
+  "${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
 
 DESCRIPTOR=dist/registry/artifact-create/package.toml
 grep -q '^format = "tar.gz"$' "$DESCRIPTOR" || { echo "FAIL: source package did not select tar.gz"; exit 1; }
@@ -80,7 +80,7 @@ exit 1
 SH
 chmod +x "$WORK_DIR/fake-bin/old-moon"
 if MOONSTONE_CLI="$WORK_DIR/fake-bin/old-moon" ARTIFACT_LOG="$WORK_DIR/unused.log" \
-  luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/old-moon.log" 2>&1; then
+  "${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/old-moon.log" 2>&1; then
   echo "FAIL: old Moonstone artifact capability was accepted"
   exit 1
 fi

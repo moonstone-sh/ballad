@@ -173,5 +173,5 @@ print("PASS: Windows watcher bridge emits stable v1 manifests and safely resolve
 LUA
 
 cd "$WORK_DIR"
-LUA_PATH="$ROOT/.moonstone/env/share/lua/5.1/?.lua;$ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;" \
-  "${LUA_BIN:-luajit}" check.lua
+LUA_PATH="$ROOT/.moonstone/env/share/lua/5.4/?.lua;$ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;" \
+  "${LUA_BIN:-lua}" check.lua

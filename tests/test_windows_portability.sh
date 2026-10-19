@@ -73,8 +73,8 @@ printf 'tree payload\n' > tree-src/nested/file.txt
 printf '#!/bin/sh\nexit 0\n' > tree-src/run
 chmod +x tree-src/run
 ln -s nested/file.txt tree-src/link
-LUA_PATH="$ROOT/.moonstone/env/share/lua/5.1/?.lua;$ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;" \
-  "${LUA_BIN:-luajit}" check.lua
+LUA_PATH="$ROOT/.moonstone/env/share/lua/5.4/?.lua;$ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;" \
+  "${LUA_BIN:-lua}" check.lua
 test -L tree-dest/link
 test "$(readlink tree-dest/link)" = "nested/file.txt"
 test -x tree-dest/run

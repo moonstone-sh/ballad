@@ -5,7 +5,7 @@ BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-layout-exec.XXXXXX)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-mkdir -p "$WORK_DIR/generated/app" "$WORK_DIR/unused" "$WORK_DIR/.moonstone/env/share/lua/5.1/helper" "$WORK_DIR/.moonstone/env/lib/lua/5.1"
+mkdir -p "$WORK_DIR/generated/app" "$WORK_DIR/unused" "$WORK_DIR/.moonstone/env/share/lua/5.4/helper" "$WORK_DIR/.moonstone/env/lib/lua/5.1"
 cat > "$WORK_DIR/moonstone.toml" <<'TOML'
 manifest_version = 2
 
@@ -28,7 +28,7 @@ local helper = require("helper.message")
 print("meteorite:" .. helper.value)
 LUA
 printf 'do not export\n' > "$WORK_DIR/unused/notes.txt"
-cat > "$WORK_DIR/.moonstone/env/share/lua/5.1/helper/message.lua" <<'LUA'
+cat > "$WORK_DIR/.moonstone/env/share/lua/5.4/helper/message.lua" <<'LUA'
 return { value = "ok" }
 LUA
 printf 'native-placeholder\n' > "$WORK_DIR/.moonstone/env/lib/lua/5.1/meteorite_native.so"
@@ -58,9 +58,9 @@ end)
 LUA
 
 cd "$WORK_DIR"
-LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
 
 test -x dist/meteorite/bin/meteorite || { echo "FAIL: launcher missing or not executable"; exit 1; }
 test -f dist/meteorite/bin/meteorite.cmd || { echo "FAIL: Windows launcher missing"; exit 1; }

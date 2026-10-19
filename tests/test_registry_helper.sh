@@ -40,10 +40,10 @@ SH
 chmod +x "$WORK_DIR/fake-bin/moon"
 
 cd "$WORK_DIR"
-LUA_PATH="$ROOT/.moonstone/env/share/lua/5.1/?.lua;$ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;"
+LUA_PATH="$ROOT/.moonstone/env/share/lua/5.4/?.lua;$ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;"
 export LUA_PATH
 PATH="$WORK_DIR/fake-bin:$PATH" MOONSTONE_CLI="$WORK_DIR/fake-bin/moon" \
-  luajit "$ROOT/src/main.lua" play partiture.ballad-watch.lua > run.log 2>&1 || { cat run.log; exit 1; }
+  "${LUA_BIN:-lua}" "$ROOT/src/main.lua" play partiture.ballad-watch.lua > run.log 2>&1 || { cat run.log; exit 1; }
 
 descriptor=dist/registry/ballad-watch/package.toml
 test -f "$descriptor" || { echo "FAIL: helper descriptor missing"; exit 1; }

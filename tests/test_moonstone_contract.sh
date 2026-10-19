@@ -44,8 +44,8 @@ esac
 SH
 chmod +x "$WORK_DIR/moon"
 
-EXPECTED_PROJECT_ROOT="$WORK_DIR/project" LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;" \
-  "${LUA_BIN:-luajit}" - "$WORK_DIR/project" "$WORK_DIR/moon" <<'LUA'
+EXPECTED_PROJECT_ROOT="$WORK_DIR/project" LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;" \
+  "${LUA_BIN:-lua}" - "$WORK_DIR/project" "$WORK_DIR/moon" <<'LUA'
 local project = require("ballad.project")
 local loaded = project.load(arg[1], { moon = arg[2] })
 

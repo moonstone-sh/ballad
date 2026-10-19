@@ -35,7 +35,7 @@ LUA
 cd "$WORK_DIR"
 mkdir src
 printf 'return true\n' > src/main.lua
-"${LUA_BIN:-luajit}" "$ROOT/src/main.lua" play partiture.lua >/tmp/ballad-watcher-test.log 2>&1 || {
+"${LUA_BIN:-lua}" "$ROOT/src/main.lua" play partiture.lua >/tmp/ballad-watcher-test.log 2>&1 || {
   cat /tmp/ballad-watcher-test.log
   exit 1
 }

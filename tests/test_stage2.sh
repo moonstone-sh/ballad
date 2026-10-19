@@ -2,7 +2,7 @@
 set -eu
 
 BALLAD_ROOT=${BALLAD_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
-BALLAD_LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+BALLAD_LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 
 cd "$BALLAD_ROOT"
 LUA_PATH=$BALLAD_LUA_PATH
@@ -208,7 +208,7 @@ cd /tmp/love-test-project
 rm -rf dist
 LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/love_test.log 2>&1
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/love_test.log 2>&1
 test -f dist/my-love-game.love || { echo "FAIL: .love archive not created"; exit 1; }
 unzip -l dist/my-love-game.love | grep -q "main.lua" || { echo "FAIL: main.lua not in .love archive"; exit 1; }
 unzip -l dist/my-love-game.love | grep -q "conf.lua" || { echo "FAIL: conf.lua not in .love archive"; exit 1; }
@@ -224,7 +224,7 @@ mkdir -p /tmp/love-determinism
 cp -r /tmp/love-test-project/dist/love-root /tmp/love-determinism/source
 LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
-luajit -e 'local archive = require("ballad.archive"); local fs = require("ballad.fs"); local path = require("ballad.path"); local entries = {}; for _, f in ipairs(fs.list_files("/tmp/love-determinism/source")) do local rel = path.relative(f, "/tmp/love-determinism/source"); table.insert(entries, {path = rel, src = f}); end; archive.zip_store(entries, "/tmp/love-determinism/a.love", {deterministic = true}); archive.zip_store(entries, "/tmp/love-determinism/b.love", {deterministic = true});'
+"${LUA_BIN:-lua}" -e 'local archive = require("ballad.archive"); local fs = require("ballad.fs"); local path = require("ballad.path"); local entries = {}; for _, f in ipairs(fs.list_files("/tmp/love-determinism/source")) do local rel = path.relative(f, "/tmp/love-determinism/source"); table.insert(entries, {path = rel, src = f}); end; archive.zip_store(entries, "/tmp/love-determinism/a.love", {deterministic = true}); archive.zip_store(entries, "/tmp/love-determinism/b.love", {deterministic = true});'
 HASH_A=$(b3sum --no-names /tmp/love-determinism/a.love)
 HASH_B=$(b3sum --no-names /tmp/love-determinism/b.love)
 if [ "$HASH_A" != "$HASH_B" ]; then
@@ -274,7 +274,7 @@ cd /tmp/nvim-test-project
 rm -rf dist
 LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/nvim_test.log 2>&1
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/nvim_test.log 2>&1
 test -d dist/nvim-plugin/lua/my_plugin || { echo "FAIL: lua/my_plugin not in output"; exit 1; }
 test -f dist/nvim-plugin/plugin/my_plugin.lua || { echo "FAIL: plugin/my_plugin.lua not in output"; exit 1; }
 test -f dist/nvim-plugin/doc/my_plugin.txt || { echo "FAIL: doc/my_plugin.txt not in output"; exit 1; }
@@ -291,13 +291,13 @@ cd /tmp/love-test-project
 rm -rf dist .ballad/cache
 LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/cache_run1.log 2>&1
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/cache_run1.log 2>&1
 if grep -q "Cache hit" /tmp/cache_run1.log; then
   echo "FAIL: first run should not have cache hits"
   exit 1
 fi
 test -d .ballad/cache/tasks || { echo "FAIL: cache directory not created"; exit 1; }
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/cache_run2.log 2>&1
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/cache_run2.log 2>&1
 if ! grep -q "Cache hit" /tmp/cache_run2.log; then
   echo "FAIL: second run should have cache hits"
   exit 1
@@ -306,7 +306,7 @@ echo "PASS: cache skips tasks on second run"
 
 # Test: deleting output invalidates cache
 rm -f dist/my-love-game.love
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/cache_run3.log 2>&1
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/cache_run3.log 2>&1
 if grep -q "Cache hit: node_5" /tmp/cache_run3.log; then
   echo "FAIL: deleted output should invalidate cache"
   exit 1
@@ -342,7 +342,7 @@ return ballad.partiture(function(p)
 end)
 LUAEOF
 rm -f /tmp/parallel_a.txt /tmp/parallel_b.txt
-luajit "$BALLAD_ROOT/src/main.lua" play /tmp/test_parallel.lua --jobs 2 > /tmp/parallel_test.log 2>&1
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play /tmp/test_parallel.lua --jobs 2 > /tmp/parallel_test.log 2>&1
 test -f /tmp/parallel_a.txt || { echo "FAIL: parallel task A did not produce output"; exit 1; }
 test -f /tmp/parallel_b.txt || { echo "FAIL: parallel task B did not produce output"; exit 1; }
 grep -q "a" /tmp/parallel_a.txt || { echo "FAIL: parallel task A content wrong"; exit 1; }
@@ -403,7 +403,7 @@ cd /tmp/nvim-deps-test-project
 rm -rf dist .ballad/cache
 LUA_PATH=$BALLAD_LUA_PATH
 export LUA_PATH
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/nvim_deps_test.log 2>&1
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > /tmp/nvim_deps_test.log 2>&1
 
 # Check that the plugin was emitted
 if [ ! -d "dist/nvim-plugin/lua/my_plugin" ]; then
