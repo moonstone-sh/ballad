@@ -245,8 +245,9 @@ features. Watchers use a separately provisioned native helper described below.
 With `--jobs > 1`, native tasks run sequentially on Windows rather than being
 backgrounded.
 
-Ballad's CI validates Windows path and launcher serialization, not execution on
-a native Windows runner.
+Ballad has native Windows x64 task, filesystem, export and relocated-launcher
+checks. See [the Windows host contract](docs/WINDOWS.md) for the exact scope and
+remaining toolchain boundaries.
 
 ## Executable Tool Export
 
