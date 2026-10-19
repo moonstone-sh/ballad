@@ -363,7 +363,8 @@ it does not merge sibling tool scopes or native modules across interpreter
 boundaries.
 
 Use `sync = "locked"` for reproducible exports. It requires the child lockfile
-to be current. `sync = "update"` is for intentionally lockless examples and
+to be current. Synchronization runs before consulting the child export cache;
+a sync failure prevents the export. `sync = "update"` is for intentionally lockless examples and
 development projects; it refreshes the child environment and is non-cacheable
 by default. `sync = "never"` requires a previously synchronized child.
 

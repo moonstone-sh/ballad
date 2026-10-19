@@ -11,18 +11,12 @@ assert moon
 with tempfile.TemporaryDirectory(prefix='ballad flavors ') as temporary:
     root = Path(temporary).resolve()
     child = root/'child'
-    tools = root/'forbidden shell'
-    tools.mkdir()
-    (tools/'sh').write_text('#!/bin/sh\nexit 99\n')
-    (tools/'sh').chmod(0o755)
-    (tools/'sh.cmd').write_text('@exit /b 99\n')
     def run(project, *args, target=None, failure=False):
         env = dict(os.environ)
         if target:
             env['MOONSTONE_TARGET'] = target
-            env['PATH'] = str(tools)+os.pathsep+env['PATH']
         result = subprocess.run([moon, '-C', str(project), *args], env=env, capture_output=True, text=True, timeout=180)
-        assert (result.returncode != 0) == failure, (args, result.stdout, result.stderr)
+        assert (result.returncode != 0) == failure, (args, result.returncode, result.stdout, result.stderr)
         return result.stdout + result.stderr
     for project in (root, child):
         run(root, 'init', str(project), '--name', 'flavor-fixture', '--interpreter', 'lua@5.4', '--no-sync', '--no-git')
@@ -45,6 +39,11 @@ end)
 ''')
     (root/'parent.lua').write_text('''local ballad=require("ballad")
 return ballad.partiture(function(p)
+  local native_task=p.native_task
+  p.native_task=function(self,opts)
+    assert(opts.tool~="sh" and opts.tool~="bash" and not opts.cmd,"orbit export invoked a shell task")
+    return native_task(self,opts)
+  end
   local moonstone=p:use(ballad.plugins.moonstone)
   local child=moonstone.orbit("child"):partiture("partiture.lua"):run({sync="locked"}):product("release")
   p.sink.directory(child,{out="release"})
