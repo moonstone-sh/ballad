@@ -136,7 +136,14 @@ function fs.list_files(root)
   end
   local pipe = io.popen(command, "r")
   if not pipe then return files end
-  for file_path in pipe:lines() do files[#files + 1] = path.normalize(file_path) end
+  for file_path in pipe:lines() do
+    local normalized = path.normalize(file_path)
+    if process.is_windows() then
+      -- dir /s always emits absolute names; preserve the caller's root shape.
+      normalized = path.join(root, path.relative(normalized, path.absolute(root)))
+    end
+    files[#files + 1] = normalized
+  end
   pipe:close()
   table.sort(files)
   return files
