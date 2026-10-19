@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: moonstone-sh/moonstone
-          ref: f36f9409cad41db483d97235ee7a0fcb39ad0b16
+          ref: 9a8efe9f609dc305d734031c9c3dc9374f01a6eb
           path: .ci/moonstone
       - uses: mlugg/setup-zig@v2
         with:
