@@ -12,7 +12,7 @@ return ballad.partiture(function(p)
 		name = "ballad",
 		entry = "src/main.lua",
 		bin = "ballad",
-		interpreter = "luajit",
+		interpreter = "lua",
 		include = {
 			"src/**",
 		},
@@ -22,8 +22,8 @@ return ballad.partiture(function(p)
 		name = project.registry_name or "moonstone/ballad",
 		version = project.version,
 		target = "any",
-		runtime = project.runtime_spec or "moonstone/luajit@2.1.0",
-		lua_abi = project.lua_abi or "5.1",
+		runtime = project.runtime_spec or "moonstone/lua@5.4",
+		lua_abi = project.lua_abi or "5.4",
 		description = project.description,
 		-- Package the project README (declared via `readme = "./README.md"` in
 		-- moonstone.toml [package], or auto-detected as ./REGISTRY_README.md,

@@ -1,5 +1,5 @@
 local archive = {}
-local bit = require("bit")
+local bit = require("ballad.bitops")
 
 -- CRC32 lookup table
 local crc_table = {}
