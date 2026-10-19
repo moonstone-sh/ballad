@@ -133,7 +133,16 @@ function process.capture_run(opts)
 end
 
 function process.b3sum(path)
-  return process.capture("b3sum --no-names " .. process.quote(path))
+  local hash
+  if process.is_windows() then
+    local result = process.capture_run({tool="moon", args={"artifact", "hash", "--", path}})
+    if result.exit_code ~= 0 then error("Moonstone file hashing failed: " .. result.stderr) end
+    hash = result.stdout
+  else
+    hash = process.capture("b3sum --no-names " .. process.quote(path))
+  end
+  if #hash ~= 64 or not hash:match("^[0-9a-f]+$") then error("BLAKE3 hashing failed for " .. path) end
+  return hash
 end
 
 function process.b3sum_string(content)
@@ -142,11 +151,12 @@ function process.b3sum_string(content)
   if f then
     f:write(content)
     f:close()
-    local hash = process.b3sum(tmp)
+    local ok, hash = pcall(process.b3sum, tmp)
     os.remove(tmp)
+    if not ok then error(hash) end
     return hash
   end
-  return ""
+  error("Cannot create temporary file for BLAKE3 hashing")
 end
 
 return process

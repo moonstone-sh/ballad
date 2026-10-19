@@ -36,3 +36,5 @@ is a runtime concern; UTF-8 Lua strings alone do not certify those boundaries.
 These changes require the companion Moonstone source-materialization and
 canonical-archive fixes. Package releases must publish the portable Ballad
 runtime metadata before dependent tools switch their Windows install path.
+
+Cache and report fingerprints use `moon artifact hash` on Windows, so `b3sum` is not a system prerequisite. Hash failures abort the build instead of creating empty cache identities.

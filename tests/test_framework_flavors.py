@@ -18,6 +18,11 @@ with tempfile.TemporaryDirectory(prefix='ballad flavors ') as temporary:
         result = subprocess.run([moon, '-C', str(project), *args], env=env, capture_output=True, text=True, timeout=180)
         assert (result.returncode != 0) == failure, (args, result.returncode, result.stdout, result.stderr)
         return result.stdout + result.stderr
+    if os.name == 'nt':
+        sample = root/'hash sample.bin'
+        sample.write_bytes(b'hello')
+        digest = run(root, 'artifact', 'hash', '--', str(sample)).strip()
+        assert digest == 'ea8f163db38682925e4491c5e58d4bb3506ef8c14eb78a86e908c5624a67200f'
     for project in (root, child):
         run(root, 'init', str(project), '--name', 'flavor-fixture', '--interpreter', 'lua@5.4', '--no-sync', '--no-git')
         run(project, 'add', 'path:'+repo.as_posix(), '--tool', '--no-sync')
