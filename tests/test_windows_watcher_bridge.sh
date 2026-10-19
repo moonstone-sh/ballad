@@ -24,7 +24,7 @@ process.is_windows = function() return true end
 process.cwd = function() return "C:/fixture" end
 process.capture_run = function(opts)
   calls[#calls + 1] = opts
-  if opts.tool == "moon" then
+  if opts.tool == (os.getenv("MOONSTONE_BIN") or os.getenv("MOONSTONE_CLI") or "moon") then
     assert(table.concat(opts.args, " ") == "provision resolve ballad-watch --json")
     if resolver == "missing" then return { exit_code = 1, stdout = "", stderr = "tool provision unavailable offline" } end
     if resolver == "old" then return { exit_code = 0, stdout = '{"contract":"moonstone:tool-resolve:v0"}', stderr = "" } end
