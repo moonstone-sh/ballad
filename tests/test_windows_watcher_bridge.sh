@@ -134,7 +134,7 @@ assert(manifest.reactions[2].label == "assets second")
 assert(table.concat(manifest.output_exclusions, ",")
   == "dist/bootstrap,dist/native-bootstrap,dist/app,dist/native-app,dist/assets,dist/native-assets")
 assert(#calls == 4, "each bridge run must resolve then invoke exactly once")
-assert(calls[1].tool == "moon" and calls[2].tool == "C:/helper/ballad-watch.exe")
+assert(calls[1].tool == (os.getenv("MOONSTONE_BIN") or os.getenv("MOONSTONE_CLI") or "moon") and calls[2].tool == "C:/helper/ballad-watch.exe")
 
 calls = {}
 local once_manifest = run(true)
