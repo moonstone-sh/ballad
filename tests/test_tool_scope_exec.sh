@@ -60,8 +60,8 @@ end)
 LUA
 
 cd "$WORK_DIR"
-export LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
+export LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
 
 test -x dist/formatter/bin/formatter || { echo "FAIL: launcher missing or not executable"; exit 1; }
 test -f dist/formatter/bin/formatter.cmd || { echo "FAIL: Windows tool launcher missing"; exit 1; }

@@ -14,7 +14,7 @@ mkdir -p "$CI_PROBE_DIR"
 printf 'CI scaffolding must not ship.\n' > "$CI_PROBE_DIR/ignored.txt"
 trap 'rm -rf "$CI_PROBE_DIR"' EXIT INT TERM
 rm -rf dist/ballad
-luajit src/main.lua play partiture.lua
+"${LUA_BIN:-lua}" src/main.lua play partiture.lua
 PKG_VERSION=$(grep '^version' dist/ballad/registry-artifact/package.toml | head -1)
 echo "package.toml version line: $PKG_VERSION"
 EXPECTED_VERSION=$(grep '^version' moonstone.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
@@ -80,7 +80,7 @@ return ballad.partiture(function(p)
 end)
 LUAEOF
 rm -rf dist/flat-root
-luajit src/main.lua play /tmp/test_flat.lua > /tmp/flat_test.log 2>&1
+"${LUA_BIN:-lua}" src/main.lua play /tmp/test_flat.lua > /tmp/flat_test.log 2>&1
 test -f dist/flat-root/src/main.lua || { echo "FAIL: dist/flat-root/src/main.lua missing"; cat /tmp/flat_test.log; exit 1; }
 test -d dist/flat-root/lua || { echo "FAIL: dist/flat-root/lua missing"; cat /tmp/flat_test.log; exit 1; }
 ! test -f dist/flat-root/bin/ballad || { echo "FAIL: flat layout should not create launcher"; exit 1; }
@@ -109,7 +109,7 @@ end)
 LUAEOF
 rm -f native-output.txt
 rm -rf .ballad/runs
-luajit src/main.lua play /tmp/test_native_success.lua > /tmp/native_success.log 2>&1
+"${LUA_BIN:-lua}" src/main.lua play /tmp/test_native_success.lua > /tmp/native_success.log 2>&1
 test -f native-output.txt || { echo "FAIL: native-output.txt not created"; exit 1; }
 grep -q "hello" native-output.txt || { echo "FAIL: native-output.txt content wrong"; exit 1; }
 LATEST_RUN=$(ls -1t .ballad/runs | head -1)
@@ -131,7 +131,7 @@ return ballad.partiture(function(p)
   })
 end)
 LUAEOF
-if luajit src/main.lua play /tmp/test_native_tool.lua > /tmp/native_tool.log 2>&1; then
+if "${LUA_BIN:-lua}" src/main.lua play /tmp/test_native_tool.lua > /tmp/native_tool.log 2>&1; then
   echo "FAIL: should have failed for missing tool"
   exit 1
 fi
@@ -154,7 +154,7 @@ return ballad.partiture(function(p)
   })
 end)
 LUAEOF
-if luajit src/main.lua play /tmp/test_native_output.lua > /tmp/native_output.log 2>&1; then
+if "${LUA_BIN:-lua}" src/main.lua play /tmp/test_native_output.lua > /tmp/native_output.log 2>&1; then
   echo "FAIL: should have failed for missing output"
   exit 1
 fi

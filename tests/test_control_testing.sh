@@ -81,10 +81,10 @@ end)
 LUA
 
 cd "$WORK_DIR"
-LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
 
-luajit - <<'LUA'
+"${LUA_BIN:-lua}" - <<'LUA'
 local testing = require("ballad.testing")
 local process = require("ballad.process")
 local cache = require("ballad.cache")
@@ -146,7 +146,7 @@ assert(not require("ballad.fs").is_file("should-not-run.txt"), "native work ran 
 LUA
 
 rm -rf dist
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua --report report.json -- release desktop >/dev/null
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua --report report.json -- release desktop >/dev/null
 grep -q '"controls"' report.json
 grep -q '"name":"mode"' report.json
 grep -q '"value":"release"' report.json

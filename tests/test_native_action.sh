@@ -53,13 +53,13 @@ cd "$WORK_DIR"
 mkdir src
 printf 'return true\n' > src/main.lua
 
-"${LUA_BIN:-luajit}" "$ROOT/src/main.lua" play build_partiture.lua >/tmp/ballad-native-action-build.log 2>&1 || {
+"${LUA_BIN:-lua}" "$ROOT/src/main.lua" play build_partiture.lua >/tmp/ballad-native-action-build.log 2>&1 || {
   cat /tmp/ballad-native-action-build.log
   exit 1
 }
 test "$(cat build/count)" = "run"
 
-"${LUA_BIN:-luajit}" "$ROOT/src/main.lua" play watch_partiture.lua >/tmp/ballad-native-action-watch.log 2>&1 || {
+"${LUA_BIN:-lua}" "$ROOT/src/main.lua" play watch_partiture.lua >/tmp/ballad-native-action-watch.log 2>&1 || {
   cat /tmp/ballad-native-action-watch.log
   exit 1
 }

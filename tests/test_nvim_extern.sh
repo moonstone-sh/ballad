@@ -72,9 +72,9 @@ end)
 LUA
 
 cd "$WORKDIR"
-LUA_PATH="$ROOT/.moonstone/env/share/lua/5.1/?.lua;$ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;"
+LUA_PATH="$ROOT/.moonstone/env/share/lua/5.4/?.lua;$ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;"
 export LUA_PATH
-luajit "$ROOT/src/main.lua" play partiture.lua > /tmp/ballad-nvim-extern-test.log 2>&1
+"${LUA_BIN:-lua}" "$ROOT/src/main.lua" play partiture.lua > /tmp/ballad-nvim-extern-test.log 2>&1
 
 test -f dist/nvim-plugin/registry-artifact/package.toml
 PACKAGE="dist/nvim-plugin/registry-artifact/package.toml"
@@ -101,7 +101,7 @@ return ballad.partiture(function(p)
 end)
 LUA
 
-luajit "$ROOT/src/main.lua" play partiture-suggest.lua > /tmp/ballad-nvim-extern-suggest.log 2>&1
+"${LUA_BIN:-lua}" "$ROOT/src/main.lua" play partiture-suggest.lua > /tmp/ballad-nvim-extern-suggest.log 2>&1
 grep -q "suggested dependency: plenary" /tmp/ballad-nvim-extern-suggest.log
 grep -q "nvim-lua/plenary.nvim" /tmp/ballad-nvim-extern-suggest.log
 grep -q "suggested dependency: telescope" /tmp/ballad-nvim-extern-suggest.log

@@ -6,7 +6,7 @@ WORK_DIR=$(mktemp -d /tmp/ballad-init.XXXXXX)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 cd "$WORK_DIR"
-LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
 MOONSTONE_HOME="$WORK_DIR/moonstone-home"
 MOONSTONE_CONFIG="$MOONSTONE_HOME/config"
@@ -21,19 +21,19 @@ mkdir -p "$MOONSTONE_HOME" "$MOONSTONE_CONFIG" "$MOONSTONE_DATA" "$MOONSTONE_CAC
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
 
 echo "Testing ballad init love2d..."
-luajit "$BALLAD_ROOT/src/main.lua" -- init --template love2d --no-script
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" -- init --template love2d --no-script
 test -f partiture.lua
 grep -q "love.layout" partiture.lua
 rm partiture.lua
 
 echo "Testing ballad init executable..."
-luajit "$BALLAD_ROOT/src/main.lua" init --template executable --no-script
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" init --template executable --no-script
 test -f partiture.lua
 grep -q "layout.exec" partiture.lua
 rm partiture.lua
 
 echo "Testing ballad init registry..."
-luajit "$BALLAD_ROOT/src/main.lua" init --template registry --no-script
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" init --template registry --no-script
 test -f partiture.lua
 grep -q "registry.source_package" partiture.lua
 grep -q "convention.tree" partiture.lua
@@ -41,14 +41,14 @@ rm partiture.lua
 
 echo "Testing ballad init failure on existing file..."
 touch partiture.lua
-if luajit "$BALLAD_ROOT/src/main.lua" init --template love2d --no-script 2>/dev/null; then
+if "${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" init --template love2d --no-script 2>/dev/null; then
   echo "FAIL: init should fail if partiture.lua exists"
   exit 1
 fi
 
 echo "Testing ballad init failure on unknown template..."
 rm partiture.lua
-if luajit "$BALLAD_ROOT/src/main.lua" init --template nonexistent --no-script 2>unknown-template.log; then
+if "${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" init --template nonexistent --no-script 2>unknown-template.log; then
   echo "FAIL: init should fail for nonexistent template"
   exit 1
 fi
@@ -60,7 +60,7 @@ moon init moonstone-project --name init-fixture --kind lib --no-sync --no-git
 cd moonstone-project
 mkdir -p src
 printf '%s\n' 'return {}' > src/init-fixture.lua
-luajit "$BALLAD_ROOT/src/main.lua" init --template registry
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" init --template registry
 test -f partiture.lua
 moon manifest script get package --json > script.json
 grep -q 'moon exec ballad -- play partiture.lua' script.json
@@ -68,7 +68,7 @@ grep -q 'moon exec ballad -- play partiture.lua' script.json
 echo "Testing contextual script conflict diagnostics..."
 rm partiture.lua
 moon manifest script set package --command 'echo existing'
-if luajit "$BALLAD_ROOT/src/main.lua" init --template registry 2>script-conflict.log; then
+if "${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" init --template registry 2>script-conflict.log; then
   echo "FAIL: init should fail for a conflicting Moonstone script"
   exit 1
 fi

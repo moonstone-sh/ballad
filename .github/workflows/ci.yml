@@ -19,7 +19,7 @@ jobs:
           repository: moonstone-sh/moonstone
           # Pinned to an explicit SHA, not a floating branch -- see
           # release.yml's own comment on this same checkout for why.
-          ref: 4e9f979a4b64189aa7b19c65c9eb771d4eeb73dd
+          ref: 7aaf173167056c3cad1c12272f3c9de496a143de
           path: .ci/moonstone
       - uses: actions/checkout@v4
         with:
@@ -44,12 +44,13 @@ jobs:
         run: |
           moon exec -- sh -c '
             set -eu
+            lua tests/bitops_spec.lua
             ./tests/test_pipeline_progress_events.sh
             ./tests/test_layout_exec.sh
             ./tests/test_windows_portability.sh
             ./tests/test_windows_watcher_bridge.sh
             ./tests/test_native_closure.sh
-            BALLAD_ROOT="$GITHUB_WORKSPACE" .ci/ballad-ci/tests/test_stage2.sh
+            ./tests/test_stage2.sh
             ./tests/test_watcher.sh
             ./tests/test_native_action.sh
             ./tests/test_invocation_args.sh

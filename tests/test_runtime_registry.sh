@@ -27,9 +27,9 @@ end)
 LUA
 
 cd "$WORK_DIR"
-LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
 
 DESCRIPTOR="$WORK_DIR/dist/moonstone-lua-5.4.8-package.toml"
 test -f "$DESCRIPTOR" || { echo "FAIL: runtime descriptor missing"; exit 1; }

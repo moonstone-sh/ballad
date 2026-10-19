@@ -107,13 +107,13 @@ LUA
 cd "$WORK_DIR"
 MOONSTONE_HOME="$WORK_DIR/.moonstone-home"
 export MOONSTONE_HOME
-LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
-"${LUA_BIN:-luajit}" "$BALLAD_ROOT/src/main.lua" play parent.lua > "$WORK_DIR/run.log" 2>&1 || {
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play parent.lua > "$WORK_DIR/run.log" 2>&1 || {
   cat "$WORK_DIR/run.log"
   exit 1
 }
-"${LUA_BIN:-luajit}" "$BALLAD_ROOT/src/main.lua" play parent.lua > "$WORK_DIR/run-again.log" 2>&1 || {
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play parent.lua > "$WORK_DIR/run-again.log" 2>&1 || {
   cat "$WORK_DIR/run-again.log"
   exit 1
 }
@@ -129,13 +129,13 @@ grep -q '"version":2' "$report"
 grep -q '"graph_fingerprint":"b3:' "$report"
 grep -q '"fingerprint":"[0-9a-f]' "$report"
 grep -q '"--profile"' "$report"
-"${LUA_BIN:-luajit}" "$BALLAD_ROOT/src/main.lua" play parent-observed.lua > "$WORK_DIR/observed.log" 2>&1 || {
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play parent-observed.lua > "$WORK_DIR/observed.log" 2>&1 || {
   cat "$WORK_DIR/observed.log"
   exit 1
 }
 grep -R -q 'child/input/hello.txt' "$WORK_DIR/.ballad/runs"
 run_observed() {
-  "${LUA_BIN:-luajit}" "$BALLAD_ROOT/src/main.lua" play parent-observed.lua > "$WORK_DIR/observed.log" 2>&1 || {
+  "${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play parent-observed.lua > "$WORK_DIR/observed.log" 2>&1 || {
     cat "$WORK_DIR/observed.log"
     exit 1
   }
@@ -165,7 +165,7 @@ if grep -q 'nested/added.txt' "$report"; then
   echo "FAIL: deleted input remains in the child product report" >&2
   exit 1
 fi
-if "${LUA_BIN:-luajit}" "$BALLAD_ROOT/src/main.lua" play parent-unselected.lua > "$WORK_DIR/unselected.log" 2>&1; then
+if "${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play parent-unselected.lua > "$WORK_DIR/unselected.log" 2>&1; then
   echo "FAIL: unselected orbit export was accepted" >&2
   exit 1
 fi

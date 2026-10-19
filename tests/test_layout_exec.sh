@@ -5,7 +5,7 @@ BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-layout-exec.XXXXXX)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-mkdir -p "$WORK_DIR/generated/app" "$WORK_DIR/unused" "$WORK_DIR/.moonstone/env/share/lua/5.4/helper" "$WORK_DIR/.moonstone/env/lib/lua/5.1"
+mkdir -p "$WORK_DIR/generated/app" "$WORK_DIR/unused" "$WORK_DIR/.moonstone/env/share/lua/5.1/helper" "$WORK_DIR/.moonstone/env/lib/lua/5.1"
 cat > "$WORK_DIR/moonstone.toml" <<'TOML'
 manifest_version = 2
 
@@ -28,7 +28,7 @@ local helper = require("helper.message")
 print("meteorite:" .. helper.value)
 LUA
 printf 'do not export\n' > "$WORK_DIR/unused/notes.txt"
-cat > "$WORK_DIR/.moonstone/env/share/lua/5.4/helper/message.lua" <<'LUA'
+cat > "$WORK_DIR/.moonstone/env/share/lua/5.1/helper/message.lua" <<'LUA'
 return { value = "ok" }
 LUA
 printf 'native-placeholder\n' > "$WORK_DIR/.moonstone/env/lib/lua/5.1/meteorite_native.so"
