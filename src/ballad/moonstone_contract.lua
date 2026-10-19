@@ -16,7 +16,7 @@ local function capture_json(root, moon_bin, args, required)
   if output == "" then
     if required then
       error("moonstone contract query failed: moon " .. description
-        .. (result.stderr ~= "" and ("\n" .. result.stderr) or ""))
+        .. (result.stderr ~= "" and ("\n" .. result.stderr) or "") .. "\nCommand: " .. result.command)
     end
     return nil
   end

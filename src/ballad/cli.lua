@@ -40,7 +40,7 @@ local function observed_inputs(pipeline, root)
 end
 
 local function write_report(report_path, partiture_file, results, pipeline, invocation_args)
-  local root = process.capture("pwd -P")
+  local root = path.normalize(process.cwd())
   local sinks = {}
   for index, sink in ipairs(results) do
     local assets = {}
