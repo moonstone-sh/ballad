@@ -1,5 +1,6 @@
 local variants_ok, variants = pcall(function() return require("moonstone.variants") end)
-if variants_ok then variants.install() end
+local target_ok, target = pcall(function() return require("moonstone.target") end)
+if variants_ok and target_ok then variants.install(target) end
 
 local partiture = require("ballad.partiture")
 require("ballad.types")
