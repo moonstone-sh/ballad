@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-init.XXXXXX)

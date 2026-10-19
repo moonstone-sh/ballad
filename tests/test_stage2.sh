@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 BALLAD_ROOT=${BALLAD_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
 BALLAD_LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"

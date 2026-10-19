@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-pipeline-events.XXXXXX)

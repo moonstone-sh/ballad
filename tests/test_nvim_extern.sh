@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORKDIR="/tmp/ballad-nvim-extern-test"
