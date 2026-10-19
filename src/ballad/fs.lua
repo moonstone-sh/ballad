@@ -154,7 +154,7 @@ end
 
 function fs.is_dir(dir_path)
   local command = process.is_windows()
-    and ("if exist " .. process.quote(windows_path(path.join(dir_path, "NUL"))) .. " (exit /b 0) else (exit /b 1)")
+    and ("if exist " .. process.quote(windows_path(dir_path) .. "\\") .. " (exit /b 0) else (exit /b 1)")
     or ("test -d " .. process.quote(dir_path))
   return process.command_ok(command)
 end
