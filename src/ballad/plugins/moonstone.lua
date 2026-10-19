@@ -773,12 +773,12 @@ return {
     local report_path = path.join(child_root, ".ballad", "exports", invocation .. ".json")
     local command = "set -eu; "
     if sync_mode ~= "never" then
-      command = command .. process.quote(moon_bin) .. " orbit sync " .. process.quote(orbit_name) .. " --" .. sync_mode .. "; "
+      command = command .. process.quote(moon_bin) .. " --orbit " .. process.quote(orbit_name) .. " sync --" .. sync_mode .. "; "
     end
     command = command
       .. "BALLAD_ORBIT_NAME=" .. process.quote(orbit_name)
       .. " BALLAD_EXPORT_FINGERPRINT=" .. process.quote(invocation)
-      .. " " .. process.quote(moon_bin) .. " orbit exec " .. process.quote(orbit_name)
+      .. " " .. process.quote(moon_bin) .. " --orbit " .. process.quote(orbit_name) .. " exec"
       .. " -- ballad play " .. process.quote(partiture_file)
     for _, lua_path in ipairs(lua_paths) do
       command = command .. " --lua-path " .. process.quote(lua_path)
@@ -786,7 +786,7 @@ return {
     command = command
       .. " --report " .. process.quote(path.relative(report_path, child_root))
     if #args > 0 then
-      -- `moon orbit exec <orbit> --` has already consumed its command
+      -- `moon --orbit <orbit> exec --` has already consumed its command
       -- separator above. Everything that follows is passed straight to the
       -- child command, so Ballad needs exactly one separator for its own
       -- invocation arguments. A second one becomes a spurious first argument
