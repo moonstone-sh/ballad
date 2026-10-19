@@ -45,6 +45,7 @@ jobs:
         run: |
           moon exec -- sh -c '
             set -eu
+            python3 tests/test_framework_flavors.py
             ./tests/test_incremental.sh
             ./tests/test_flavors.sh
             ./tests/test_pipeline_progress_events.sh

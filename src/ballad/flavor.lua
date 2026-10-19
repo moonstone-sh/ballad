@@ -72,7 +72,7 @@ end
 function flavor.parse_id(id)
   if type(id) ~= "string" then return nil end
   local language, arch, os_name = id:match("^([%w]+)%-([%w_]+)%-([%w]+)$")
-  if not language then return nil end
+  if not language or DIMENSION[language] ~= 1 or DIMENSION[os_name] ~= 2 or DIMENSION[arch] ~= 3 then return nil end
   local level = tonumber(language:match("^lua(5%d)$"))
   if level then return { id = id, family = "lua", level = level, os = os_name, arch = arch } end
   if language == "luajit" or language == "luau" then
@@ -88,7 +88,11 @@ end
 ---@return {id:string, family:string, level:integer, os:string, arch:string}|nil
 function flavor.target()
   local from_env = os.getenv("MOONSTONE_TARGET")
-  if from_env and from_env ~= "" then return flavor.parse_id(from_env) end
+  if from_env and from_env ~= "" then
+    local target = flavor.parse_id(from_env)
+    if not target then error("invalid MOONSTONE_TARGET flavor: " .. from_env, 0) end
+    return target
+  end
   local ok, target = pcall(require, "moonstone.target")
   if ok and type(target) == "table" and type(target.id) == "string" then
     return flavor.parse_id(target.id)

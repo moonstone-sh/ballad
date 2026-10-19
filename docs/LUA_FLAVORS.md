@@ -72,19 +72,22 @@ adapter reads `MOONSTONE_TARGET` itself and selects files with the canonical
 `docs/MOONSTONE_FLAVORS.md`, "Quaver implementation status"). That is the
 right split. Ballad does not select variants, and `ballad.flavor` is not a
 second selection rule. Its `parse` defers to `moonstone.variants` when present.
-Two things remain:
+Ballad includes `ballad.cache.build_context()` in every pipeline-node and
+native-task cache key. It records the resolved target separately from the host
+and its runtime. Plugins no longer need to repeat the target in options just
+to make caching correct. Other environment-dependent inputs still belong in
+explicit options or native-task `env` declarations. An invalid explicit
+`MOONSTONE_TARGET` is an error, rather than an unknown-target cache entry.
 
-1. **The cache key does not include the target.** Ballad's node cache key
-   (`cache.compute_key`) covers plugin, method, options, controls and input
-   hashes, but not the environment. A Quaver node whose output depends on
-   `MOONSTONE_TARGET` gets a stale cache hit when only the target changes.
-   Until Ballad handles this, the plugin should put the resolved target id in
-   the node's options (`ballad.flavor.target()` returns it, or nil when
-   Moonstone set none).
-2. **Ballad should own that fix.** Put the resolved target id into every node
-   key automatically, or let a plugin method declare the environment
-   variables it reads. This was not done here because `cache.lua` and
-   `pipeline.lua` have other work in progress.
+Export reports record the same context. Orbit exports use sequential structured
+Moonstone sync and exec tasks on each host; synchronization failures stop the
+export. A shared report is invalidated when its target changes, so returning
+to a previous target cannot reuse the other target's materialized files.
+
+Choose export recipes using `ballad.flavor.target()`. Keep host commands in
+host flavor modules: a Windows target exported on macOS still runs macOS tools.
+Tagged Lua files remain source variants selected by Moonstone, not a declaration
+that a native binary has been cross-compiled.
 
 Inventory note for Quaver: Ballad sinks and source sets pass `foo@lua54.lua`
 through under its tagged path. Module names derived by Ballad drop the tags.

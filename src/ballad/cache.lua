@@ -12,7 +12,7 @@ local process = require("ballad.process")
 local dkjson = require("dkjson")
 local fs = require("ballad.fs")
 
-local CACHE_VERSION = 2
+local CACHE_VERSION = 3
 local CACHE_DIR = ".ballad/cache/tasks"
 local output_snapshot
 local serialize
@@ -89,6 +89,19 @@ serialize = function(value)
   end
 end
 
+---Resolved build inputs shared by node keys, native keys and export reports.
+---The target may differ from the host; never attach the host runtime to it.
+function cache.build_context()
+  local ok, host = pcall(function() return require("moonstone.target") end)
+  return {
+    target = require("ballad.flavor").target() or false,
+    host = ok and host or false,
+    lua = _VERSION,
+    jit = type(jit) == "table" and jit.version or false,
+    platform = process.platform(),
+  }
+end
+
 -- Compute a stable cache key for a pipeline node
 function cache.compute_key(node, input_results, plugin_version)
   local input_hashes = {}
@@ -107,6 +120,7 @@ function cache.compute_key(node, input_results, plugin_version)
   local key_data = {
     cache_version = CACHE_VERSION,
     kind = "node",
+    build_context = cache.build_context(),
     plugin = node.plugin,
     method = node.method,
     plugin_version = plugin_version or "unknown",
@@ -178,6 +192,7 @@ function cache.compute_native_key(opts, plugin_name, method_name)
   local key_data = {
     cache_version = CACHE_VERSION,
     kind = "native",
+    build_context = cache.build_context(),
     plugin = plugin_name or "unknown",
     method = method_name or "unknown",
     tool = opts.tool or (opts.cmd and opts.cmd:match("^%S+")),

@@ -12,7 +12,10 @@ the untagged implementation remains parseable on Lua 5.1.
 The native Windows x64 workflow exercises real dependency installation,
 structured tasks and their captured exit status, directory operations,
 replacement of existing files, self-export, and a relocated `.cmd` launcher.
-The separate watcher workflow builds and runs `ballad-watch.exe`.
+The separate watcher workflow builds and runs `ballad-watch.exe`. Orbit exports
+use structured Moonstone sync/exec tasks. Directory containment uses physical
+Windows paths, including junction resolution. The native orbit test switches
+between Windows and Linux target flavors and verifies cache isolation/reuse.
 
 Use structured native tasks with `tool`, `args`, `cwd` and `env`. The current
 synchronous cmd boundary rejects expansion characters and ambiguous quoting

@@ -38,6 +38,10 @@ jobs:
         run: |
           moon exec -- lua tests/windows/lifecycle.lua
           if ($LASTEXITCODE -ne 0) { throw 'native task lifecycle failed' }
+      - name: Native orbit exports and flavor cache isolation
+        run: |
+          moon exec -- python tests/test_framework_flavors.py
+          if ($LASTEXITCODE -ne 0) { throw 'native orbit/flavor contract failed' }
       - name: Export Ballad and run its relocated launcher
         shell: pwsh
         run: |

@@ -301,7 +301,7 @@ end)
 
 `moonstone.orbit("name")` only addresses an immediate child. Its
 `:partiture(path):run(opts)` invocation resolves the member through Moonstone,
-synchronizes it when requested, and executes `ballad play` through `moon orbit exec`. That preserves
+synchronizes it when requested, and executes `ballad play` through `moon --orbit <name> exec`. That preserves
 the child working directory, interpreter, tool closure, and native-module ABI
 scope. The returned handle is a **product catalog**, not an asset set: select a
 child-declared product before any parent sink, layout, or package can consume it.
@@ -594,7 +594,7 @@ asset set. The sink owns the whole directory; keep handwritten files elsewhere.
 Destination paths must stay inside that directory, and symlink destinations are
 rejected. Omitting `incremental` keeps the existing replace-directory behavior.
 
-Task cache keys include transformed content, paths, asset kinds and metadata.
+Task cache keys include transformed content, paths, asset kinds, metadata, and the resolved host/target build context.
 Native input globs such as `src/**/*.lua` include direct children and nested
 files. Cached outputs are checked against content snapshots, including directory
 file membership, so missing or modified outputs trigger regeneration. Declare

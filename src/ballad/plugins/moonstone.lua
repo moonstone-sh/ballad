@@ -276,12 +276,8 @@ local function tool_scope_assets(ctx, project_asset, opts)
 end
 
 local function canonical_dir(value)
-  if not process.command_ok("test -d " .. process.quote(value)) then
-    error("moonstone.orbit: directory does not exist: " .. value)
-  end
-  local resolved = process.capture("cd " .. process.quote(value) .. " && pwd -P")
-  if resolved == "" then error("moonstone.orbit: cannot resolve directory: " .. value) end
-  return resolved
+  if not fs.is_dir(value) then error("moonstone.orbit: directory does not exist: " .. value) end
+  return require("ballad.realpath").resolve(value)
 end
 
 local function resolve_orbit(root, name, moon_bin)
@@ -298,7 +294,7 @@ local function resolve_orbit(root, name, moon_bin)
   end
 
   local child = canonical_dir(path.join(root, current.path))
-  if child ~= root and child:sub(1, #root + 1) ~= root .. "/" then
+  if not path.contains(root, child) then
     error("moonstone.orbit: orbit path escapes the root project: " .. current.path)
   end
   if not fs.read_file(path.join(child, "moonstone.toml")) then
@@ -367,7 +363,7 @@ local function child_lua_paths(root, child_root, lua_paths)
   for _, value in ipairs(lua_paths or {}) do
     if type(value) ~= "string" or value == "" then error("moonstone.orbit: lua_paths must be child-relative directories") end
     local resolved = canonical_dir(path.join(child_root, value))
-    if resolved ~= root and resolved:sub(1, #root + 1) ~= root .. "/" then
+    if not path.contains(root, resolved) then
       error("moonstone.orbit: lua_path escapes the parent project: " .. value)
     end
     result[#result + 1] = value
@@ -771,34 +767,32 @@ return {
     local args = opts.args or {}
     local invocation = invocation_fingerprint(orbit_name, child_root, partiture_file, args, lua_paths)
     local report_path = path.join(child_root, ".ballad", "exports", invocation .. ".json")
-    local command = "set -eu; "
+    local task_id = opts.id or ("moonstone.orbit:" .. orbit_name)
     if sync_mode ~= "never" then
-      command = command .. process.quote(moon_bin) .. " --orbit " .. process.quote(orbit_name) .. " sync --" .. sync_mode .. "; "
+      ctx:native_task({
+        id = task_id .. ":sync", tool = moon_bin,
+        args = { "--orbit", orbit_name, "sync", "--" .. sync_mode },
+        cwd = root, cacheable = false, parallel_safe = false,
+        description = "sync orbit " .. orbit_name,
+      })
     end
-    command = command
-      .. "BALLAD_ORBIT_NAME=" .. process.quote(orbit_name)
-      .. " BALLAD_EXPORT_FINGERPRINT=" .. process.quote(invocation)
-      .. " " .. process.quote(moon_bin) .. " --orbit " .. process.quote(orbit_name) .. " exec"
-      .. " -- ballad play " .. process.quote(partiture_file)
+    local command_args = { "--orbit", orbit_name, "exec", "--", "ballad", "play", partiture_file }
     for _, lua_path in ipairs(lua_paths) do
-      command = command .. " --lua-path " .. process.quote(lua_path)
+      command_args[#command_args + 1] = "--lua-path"
+      command_args[#command_args + 1] = lua_path
     end
-    command = command
-      .. " --report " .. process.quote(path.relative(report_path, child_root))
+    command_args[#command_args + 1] = "--report"
+    command_args[#command_args + 1] = path.relative(report_path, child_root)
     if #args > 0 then
-      -- `moon --orbit <orbit> exec --` has already consumed its command
-      -- separator above. Everything that follows is passed straight to the
-      -- child command, so Ballad needs exactly one separator for its own
-      -- invocation arguments. A second one becomes a spurious first argument
-      -- in the child's partiture.
-      command = command .. " --"
-      for _, value in ipairs(args) do command = command .. " " .. process.quote(value) end
+      command_args[#command_args + 1] = "--"
+      for _, value in ipairs(args) do command_args[#command_args + 1] = value end
     end
 
     ctx:native_task({
-      id = opts.id or ("moonstone.orbit:" .. orbit_name),
-      tool = "sh",
-      args = { "-c", command },
+      id = task_id,
+      tool = moon_bin,
+      args = command_args,
+      env = { BALLAD_ORBIT_NAME = orbit_name, BALLAD_EXPORT_FINGERPRINT = invocation },
       inputs = orbit_input_paths(child_root, partiture_file, opts.inputs or {}, report_path),
       outputs = { report_path },
       cwd = root,
