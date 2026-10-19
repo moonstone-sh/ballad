@@ -16,11 +16,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: moonstone-sh/moonstone
-          ref: b2f6d333b0686638c2d52b1f48a004cd17551b20
+          ref: 7aaf173167056c3cad1c12272f3c9de496a143de
           path: .ci/moonstone
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      - uses: actions/cache@v4
+        with:
+          path: .zig-cache
+          key: moonstone-windows-b2f6d33-zig016
       - name: Build Moonstone
         working-directory: .ci/moonstone
         run: zig build
