@@ -20,7 +20,7 @@ jobs:
           repository: moonstone-sh/moonstone
           # Pinned to an explicit SHA, not a floating branch -- see
           # release.yml's own comment on this same checkout for why.
-          ref: 9a8efe9f609dc305d734031c9c3dc9374f01a6eb
+          ref: 592534bad8185f809e53776a234921f462204452
           path: .ci/moonstone
       - uses: actions/checkout@v4
         with:

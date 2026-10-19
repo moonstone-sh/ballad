@@ -37,8 +37,7 @@ matches variant files, which is what a watch normally wants.
 
 ## Ballad's own variants
 
-`src/ballad/crc32.lua` (the zip writer's checksum) is the only code in Ballad
-whose implementation depends on the Lua flavor: LuaJIT has the `bit` library,
+`src/ballad/crc32.lua` (the zip writer's checksum) selects its implementation by Lua flavor: LuaJIT has the `bit` library,
 Lua 5.3+ has integer operators that older parsers cannot read, and PUC 5.1 has
 neither. It ships as:
 
@@ -54,17 +53,15 @@ checksums on every Lua on `PATH`). The rest of `archive.lua` is plain
 arithmetic. As a result `love` packing also works when Ballad runs on PUC Lua
 5.4 or 5.5, not only on LuaJIT.
 
-Ballad's own `src/` tree loads `crc32.lua` unless `moonstone.variants` is
-installed as a searcher. A Moonstone tool runs from its own `libexec` copy,
-which `moon sync` does not project, so the installed Ballad tool also uses the
-fallback. The variants pay off only where Ballad is a projected dependency.
+Ballad installs Moonstone's source searcher before loading platform modules,
+so checkouts and libexec tools select the host implementation too. Tagged
+sources ship in the package; Moonstone 0.7 or later is required for the
+Windows artifact request and current command contracts.
 
-**Not packaged yet.** Moonstone accepts `@` in artifact paths from 0.6.0.
-Earlier versions fail `moon artifact create` with `InvalidVirtualPath`, and a
-project that bundles Ballad's modules into its own artifact (a tool built with
-`layout.exec`) would hit that with an older Moonstone. `partiture.lua`
-therefore still excludes `src/**@*.lua`; drop the exclude once consumers are
-expected to run Moonstone 0.6.0 or later.
+Host OS behavior uses `platform.lua` and `platform@windows.lua`. This is
+independent of a release target: a macOS host exporting a Windows release
+still runs macOS subprocesses. The tool runtime is Lua 5.4 on every host.
+See [Windows support](WINDOWS.md) for the tested boundary.
 
 ## Requests for plugins that specialize per flavor (Quaver)
 
