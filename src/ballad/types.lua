@@ -8,6 +8,7 @@
 ---@field conventions table Deterministic source-package constructors.
 ---@field diagnostic table Structured diagnostic constructors and renderers.
 ---@field testing table Plan and execution assertions for caller-owned test harnesses.
+---@field flavor table Moonstone Lua flavor helpers: `parse`, `module_file`, `parse_id`, `target`.
 ---@field plugins BalladBuiltinPlugins Built-in plugin contracts for typed `p:use(ballad.plugins.*)` calls.
 
 ---@class BalladBuiltinPlugins

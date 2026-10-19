@@ -584,3 +584,23 @@ existing consumers. It requires `tar`, `zstd`, and `b3sum`; Moonstone's first
 artifact-create milestone does not produce tar.zst, so Ballad rejects that format
 on Windows with an explicit diagnostic. Ballad still only emits a `publish.sh`
 helper and descriptor; registry publication remains outside this export step.
+
+### Incremental directory output
+
+Use `p.sink.directory(assets, { out = "dist/client", incremental = true })`
+when a dedicated output tree should preserve unchanged files. Ballad compares
+output bytes before writing and removes files that are no longer present in the
+asset set. The sink owns the whole directory; keep handwritten files elsewhere.
+Destination paths must stay inside that directory, and symlink destinations are
+rejected. Omitting `incremental` keeps the existing replace-directory behavior.
+
+Task cache keys include transformed content, paths, asset kinds and metadata.
+Native input globs such as `src/**/*.lua` include direct children and nested
+files. Cached outputs are checked against content snapshots, including directory
+file membership, so missing or modified outputs trigger regeneration. Declare
+only actual build products as outputs, and declare every external input a task
+reads. Native compiler caches complement this layer when an edit requires a
+compiler invocation.
+
+Run `bash tests/test_incremental.sh` for cache invalidation, output integrity,
+stable timestamps and stale-output checks.

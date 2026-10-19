@@ -16,6 +16,7 @@ return ballad.partiture(function(p)
 		include = {
 			"src/**",
 		},
+
 	})
 
 	local registry_artifact = moonstone.registry.package(app, {

@@ -1,6 +1,7 @@
 local graph = require("ballad.graph")
 local fs = require("ballad.fs")
 local path = require("ballad.path")
+local flavor = require("ballad.flavor")
 local launchers = require("ballad.launcher")
 
 local function local_package_name(name)
@@ -18,7 +19,7 @@ local function export_filter(meta)
   end
 
   return function(relative, source)
-    local module_name = relative:gsub("%.lua$", ""):gsub("/init$", "")
+    local module_name = flavor.module_file(relative):gsub("%.lua$", ""):gsub("/init$", "")
     local top = module_name:match("^([^/]+)") or module_name
     if excluded[top] then return false end
     for name, _ in pairs(excluded) do

@@ -14,7 +14,7 @@ return ballad.partiture(function(p)
     tool = "sh",
     args = { "-c", "mkdir -p build; cat src/main.lua > build/output.lua; printf run >> build/count; printf build >> build/order" },
     inputs = { "src/**/*.lua" },
-    outputs = { "build/output.lua", "build/count", "build/order" },
+    outputs = { "build/output.lua" },
     toolchain = { command = "sh --version" },
   })
   p.sink.none(p.task.run(build))
@@ -32,7 +32,7 @@ return ballad.partiture(function(p)
     tool = "sh",
     args = { "-c", "mkdir -p build; cat src/main.lua > build/output.lua; printf run >> build/count; printf build >> build/order" },
     inputs = { "src/**/*.lua" },
-    outputs = { "build/output.lua", "build/count", "build/order" },
+    outputs = { "build/output.lua" },
     toolchain = { command = "sh --version" },
   })
   local session = watcher.watch({

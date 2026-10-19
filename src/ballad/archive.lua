@@ -1,39 +1,15 @@
 local archive = {}
-local bit = require("ballad.bitops")
+-- The checksum is the only part that depends on the Lua flavor; see crc32.lua.
+local crc32 = require("ballad.crc32")
 
--- CRC32 lookup table
-local crc_table = {}
-for i = 0, 255 do
-  local crc = i
-  for _ = 1, 8 do
-    if crc % 2 == 1 then
-      crc = bit.bxor(0xEDB88320, bit.rshift(crc, 1))
-    else
-      crc = bit.rshift(crc, 1)
-    end
-  end
-  crc_table[i] = crc
-end
-
-local function crc32(data)
-  local crc = 0xFFFFFFFF
-  for i = 1, #data do
-    local byte = string.byte(data, i)
-    crc = bit.bxor(crc_table[bit.band(bit.bxor(crc, byte), 0xFF)], bit.rshift(crc, 8))
-  end
-  return bit.bxor(crc, 0xFFFFFFFF)
-end
-
+-- Little-endian fields from non-negative integers, in plain arithmetic so the
+-- same code runs on every Lua.
 local function write_u16(v)
-  return string.char(bit.band(v, 0xFF), bit.band(bit.rshift(v, 8), 0xFF))
+  return string.char(v % 256, math.floor(v / 256) % 256)
 end
 
 local function write_u32(v)
-  local a = bit.band(v, 0xFF)
-  local b = bit.band(bit.rshift(v, 8), 0xFF)
-  local c = bit.band(bit.rshift(v, 16), 0xFF)
-  local d = bit.band(bit.rshift(v, 24), 0xFF)
-  return string.char(a, b, c, d)
+  return string.char(v % 256, math.floor(v / 256) % 256, math.floor(v / 65536) % 256, math.floor(v / 16777216) % 256)
 end
 
 -- Parse a Unix timestamp into DOS time/date.
@@ -48,8 +24,8 @@ local function unix_to_dos(timestamp)
   if year < 1980 then
     return 0x0000, 0x0000
   end
-  local dos_date = bit.bor(bit.lshift(year - 1980, 9), bit.lshift(t.month, 5), t.day)
-  local dos_time = bit.bor(bit.lshift(t.hour, 11), bit.lshift(t.min, 5), math.floor(t.sec / 2))
+  local dos_date = (year - 1980) * 512 + t.month * 32 + t.day
+  local dos_time = t.hour * 2048 + t.min * 32 + math.floor(t.sec / 2)
   return dos_time, dos_date
 end
 

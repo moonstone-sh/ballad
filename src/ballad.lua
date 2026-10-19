@@ -12,6 +12,7 @@ return {
   conventions = require("ballad.conventions"),
   diagnostic = require("ballad.diagnostic"),
   testing = require("ballad.testing"),
+  flavor = require("ballad.flavor"),
   plugins = {
     layout = require("ballad.plugins.layout"),
     love = require("ballad.plugins.love"),

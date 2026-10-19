@@ -1,4 +1,5 @@
 local process = require("ballad.process")
+local flavor = require("ballad.flavor")
 
 -- Filesystem paths use a canonical forward-slash spelling on every host.  The
 -- Win32 APIs used by Lua accept it, and keeping layout paths canonical avoids
@@ -148,8 +149,11 @@ function path.relative(value, root, platform)
   return normalized_value:sub(#prefix + 1)
 end
 
+---Module name for a Lua file path. A flavor variant (`foo@lua54.lua`) names
+---the same module as its untagged file (`foo`).
 function path.module_name(relative_path)
-  return relative_path:gsub("\\", "/"):gsub("%.lua$", ""):gsub("/init$", ""):gsub("/", ".")
+  local normalized = relative_path:gsub("\\", "/")
+  return (flavor.module_file(normalized):gsub("%.lua$", ""):gsub("/init$", ""):gsub("/", "."))
 end
 
 function path.abi_directory(abi)

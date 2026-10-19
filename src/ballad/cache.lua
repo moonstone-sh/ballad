@@ -12,8 +12,10 @@ local process = require("ballad.process")
 local dkjson = require("dkjson")
 local fs = require("ballad.fs")
 
-local CACHE_VERSION = 1
+local CACHE_VERSION = 2
 local CACHE_DIR = ".ballad/cache/tasks"
+local output_snapshot
+local serialize
 
 -- Ensure cache directory exists
 local function ensure_cache_dir()
@@ -22,7 +24,11 @@ end
 
 -- Compute a content hash for an asset
 local function hash_asset(asset)
-  if asset.source_path and fs.read_file(asset.source_path) then
+  -- A transformed asset's bytes are authoritative even when it retains its
+  -- original source path for diagnostics.
+  if asset.content ~= nil then
+    return process.b3sum_string(asset.content)
+  elseif asset.source_path and fs.read_file(asset.source_path) then
     return process.b3sum(asset.source_path)
   elseif asset.source_path and fs.is_dir(asset.source_path) then
     local manifest = asset.source_path .. "/moonstone.toml"
@@ -30,10 +36,8 @@ local function hash_asset(asset)
       return process.b3sum(manifest)
     end
     return "dir:" .. asset.source_path
-  elseif asset.content then
-    return process.b3sum_string(asset.content)
   elseif asset.output_path then
-    return "path:" .. asset.output_path
+    return process.b3sum_string(serialize(output_snapshot(asset.output_path)))
   elseif asset.virtual_path then
     return "path:" .. asset.virtual_path
   else
@@ -59,7 +63,7 @@ local function normalize(t)
 end
 
 -- Deterministic string serializer for cache keys
-local function serialize(value)
+serialize = function(value)
   local t = type(value)
   if t == "string" then
     return string.format("%q", value)
@@ -91,7 +95,11 @@ function cache.compute_key(node, input_results, plugin_version)
   for i, asset_set in ipairs(input_results) do
     local hashes = {}
     for _, asset in ipairs(asset_set.assets) do
-      table.insert(hashes, hash_asset(asset))
+      table.insert(hashes, {
+        hash = hash_asset(asset), kind = asset.kind, virtual_path = asset.virtual_path,
+        source_path = asset.source_path, output_path = asset.output_path,
+        generated = asset.generated, metadata = asset.metadata,
+      })
     end
     table.insert(input_hashes, { index = i, hashes = hashes })
   end
@@ -111,25 +119,6 @@ function cache.compute_key(node, input_results, plugin_version)
   return process.b3sum_string(json)
 end
 
-local function glob_to_pattern(glob)
-  if glob:match("/%*%*$") then
-    local prefix = glob:gsub("/%*%*$", "")
-    return "^" .. prefix:gsub("([%.%+%-%^%$%(%)%%])", "%%%1") .. "/.*$"
-  end
-  if glob:sub(1, 2) == "**" then
-    local suffix = glob:sub(3)
-    if suffix:sub(1, 1) == "/" then
-      return ".*" .. suffix:gsub("([%.%+%-%^%$%(%)%%])", "%%%1") .. "$"
-    end
-    return ".*" .. glob:gsub("([%.%+%-%^%$%(%)%%])", "%%%1") .. ".*"
-  end
-  local pattern = glob:gsub("([%.%+%-%^%$%(%)%%])", "%%%1")
-  pattern = pattern:gsub("%*%*/", ".-/")
-  pattern = pattern:gsub("%*%*", ".-")
-  pattern = pattern:gsub("%*", "[^/]+")
-  return "^" .. pattern .. "$"
-end
-
 -- Compute a stable cache key for a native task
 function cache.compute_native_key(opts, plugin_name, method_name)
   local input_hashes = {}
@@ -138,7 +127,6 @@ function cache.compute_native_key(opts, plugin_name, method_name)
   local function collect_inputs(inp)
     if type(inp) == "string" then
       if inp:find("%*") then
-        local glob_pat = glob_to_pattern(inp)
         -- Orbit inputs are absolute; enumerate their fixed directory prefix
         -- rather than comparing an absolute glob with relative project paths.
         local prefix = inp:match("^(.-)[*]") or ""
@@ -147,7 +135,7 @@ function cache.compute_native_key(opts, plugin_name, method_name)
         local files = fs.list_files(base)
         for _, f in ipairs(files) do
           local rel = f:gsub("^%./", "")
-          if rel:match(glob_pat) or f:match(glob_pat) then
+          if require("ballad.glob").matches(rel, inp) or require("ballad.glob").matches(f, inp) then
             table.insert(inputs_to_process, rel)
           end
         end
@@ -230,13 +218,33 @@ function cache.read(key)
   return entry
 end
 
--- Verify that all declared outputs still exist
+-- Snapshot bytes and file membership, not merely output existence.
+output_snapshot = function(out)
+  if fs.is_dir(out) then
+    local files = {}
+    for _, file in ipairs(fs.list_files(out)) do
+      local target = fs.readlink(file)
+      files[#files + 1] = {
+        path = require("ballad.path").relative(file, out),
+        hash = fs.is_dir(file) and "directory-link" or process.b3sum(file),
+        link = target ~= file and target or nil,
+      }
+    end
+    return { kind = "directory", files = files }
+  elseif fs.read_file(out) ~= nil then
+    return { kind = "file", hash = process.b3sum(out) }
+  end
+  return nil
+end
+
 function cache.outputs_valid(entry)
   if not entry or not entry.outputs then
     return false
   end
   for _, out in ipairs(entry.outputs) do
-    if not fs.read_file(out) and not fs.is_dir(out) then
+    local snapshot = output_snapshot(out)
+    if not snapshot or not entry.output_snapshots or
+      serialize(snapshot) ~= serialize(entry.output_snapshots[out]) then
       return false
     end
   end
@@ -270,7 +278,12 @@ function cache.store(key, result_asset_set, outputs)
     timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
     outputs = outputs or {},
     assets = asset_info,
+    output_snapshots = {},
   }
+
+  for _, out in ipairs(entry.outputs) do
+    entry.output_snapshots[out] = output_snapshot(out)
+  end
 
   fs.write_file(path, dkjson.encode(entry) .. "\n")
 end

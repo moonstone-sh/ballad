@@ -173,8 +173,8 @@ local function action_command(action, reason)
     return "BALLAD_WATCH_REASON=" .. reason_assignment(reason) .. " " .. runner .. " " .. shell_quote(action.spec_path)
   end
   return "BALLAD_WATCH_REASON=" .. reason_assignment(reason)
-    .. " lua -e " .. shell_quote("require('ballad.native_action').run_file(arg[1])")
-    .. " " .. shell_quote(action.spec_path)
+    .. " BALLAD_NATIVE_ACTION_FILE=" .. shell_quote(action.spec_path)
+    .. " lua -e " .. shell_quote("require('ballad.native_action').run_file(assert(os.getenv('BALLAD_NATIVE_ACTION_FILE')))")
 end
 
 local function run_command(step, reason, cwd_prefix)

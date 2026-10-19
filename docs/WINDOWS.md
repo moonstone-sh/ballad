@@ -6,7 +6,7 @@ for its target. Running Ballad does not require a Windows LuaJIT artifact.
 
 Moonstone selects `ballad.platform@windows.lua` during dependency projection.
 Source checkouts install `moonstone.variants` before loading host modules.
-Checksum operators have separate Lua 5.2, 5.3, 5.4, 5.5 and LuaJIT variants;
+ZIP checksums reuse the Lua 5.4 and LuaJIT variants from `ballad.crc32`;
 the untagged implementation remains parseable on Lua 5.1.
 
 The native Windows x64 workflow exercises real dependency installation,
