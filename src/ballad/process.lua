@@ -1,7 +1,13 @@
+local variants_ok, variants = pcall(function() return require("moonstone.variants") end)
+local target_ok, target = pcall(function() return require("moonstone.target") end)
+if variants_ok and target_ok then variants.install(target) end
+
+local host = require("ballad.platform")
+local windows = require("ballad.windows_command")
 local process = {}
 
 function process.is_windows()
-  return package.config:sub(1, 1) == "\\" or os.getenv("OS") == "Windows_NT"
+  return host.windows
 end
 
 function process.platform()
@@ -70,83 +76,26 @@ function process.find_tool(tool)
   return found ~= "" and found or nil
 end
 
-local function posix_command(opts)
-  local parts = { process.quote(opts.tool) }
-  for _, arg in ipairs(opts.args or {}) do parts[#parts + 1] = process.quote(arg) end
-  local command = table.concat(parts, " ")
-  local env = {}
-  for key, value in pairs(opts.env or {}) do env[#env + 1] = key .. "=" .. process.quote(value) end
-  table.sort(env)
-  if #env > 0 then command = table.concat(env, " ") .. " " .. command end
-  return "cd " .. process.quote(opts.cwd or ".") .. " && " .. command
-end
-
--- Lua 5.1/LuaJIT exposes only os.execute, which delegates to cmd.exe on
--- Windows. It cannot call CreateProcessW with a real argv vector. Quoting is
--- not a sufficient command-processor security boundary, so accept only values
--- that cannot alter cmd parsing. Callers needing the rejected characters must
--- put them in a file or use a purpose-built helper executable.
-local function windows_value(value, subject)
-  if type(value) ~= "string" then
-    error("Windows process " .. subject .. " must be a string")
-  end
-  if value:find("\r", 1, true) or value:find("\n", 1, true) or value:find("\0", 1, true) then
-    error("Windows process " .. subject .. " cannot contain a newline or NUL")
-  end
-  if value:find('[&|<>()^"!%%]') then
-    error("Windows process " .. subject .. " contains a cmd metacharacter; use a helper or a file for this value")
-  end
-  if value:sub(-1) == "\\" then
-    error("Windows process " .. subject .. " cannot end with \\: use a forward slash path spelling")
-  end
-  return value
-end
-
--- `cmd` does not use CRT backslash-quote escaping. Values above exclude the
--- syntax that would make ordinary cmd quotes ambiguous, including a trailing
--- backslash that the child CRT could consume as the closing quote.
-local function windows_quote(value, subject)
-  return '"' .. windows_value(value, subject) .. '"'
-end
-
-local function windows_command(opts)
-  local parts = { windows_quote(opts.tool, "tool") }
-  for index, arg in ipairs(opts.args or {}) do
-    parts[#parts + 1] = windows_quote(arg, "argument " .. index)
-  end
-  local command = table.concat(parts, " ")
-  local env = {}
-  for key, value in pairs(opts.env or {}) do
-    if type(key) ~= "string" or not key:match("^[A-Za-z_][A-Za-z0-9_]*$") then
-      error("Windows process environment names must match [A-Za-z_][A-Za-z0-9_]*: " .. tostring(key))
-    end
-    env[#env + 1] = key .. "=" .. windows_value(value, "environment " .. key)
-  end
-  table.sort(env)
-  local prefix = {
-    "setlocal DisableDelayedExpansion",
-    "pushd " .. windows_quote(opts.cwd or ".", "cwd"),
-  }
-  for _, assignment in ipairs(env) do prefix[#prefix + 1] = "set \"" .. assignment .. "\"" end
-  prefix[#prefix + 1] = command
-  -- os.execute already enters cmd.exe. This nested cmd owns the whole
-  -- compound payload; ordinary inner quotes remain ordinary cmd quotes.
-  return 'cmd /d /v:off /s /c "' .. table.concat(prefix, " && ") .. '"'
-end
-
 ---Build the host-shell command for a structured process invocation.
 ---`platform` is primarily useful for tests; production calls use the host.
 function process.build_command(opts, platform)
   if not opts or type(opts.tool) ~= "string" or opts.tool == "" then error("process.run requires tool") end
   platform = platform or process.platform()
-  local command = platform == "windows" and windows_command(opts) or posix_command(opts)
+  local command
+  if platform == process.platform() then
+    command = host.command(opts)
+  elseif platform == "windows" then
+    command = windows.command(opts)
+  else
+    error("cannot serialize a non-host POSIX command on Windows")
+  end
   if opts.stdout_file then
-    local stdout_file = platform == "windows" and windows_value(opts.stdout_file, "stdout_file") or opts.stdout_file
-    command = command .. " > " .. (platform == "windows" and windows_quote(stdout_file, "stdout_file") or process.quote(stdout_file, platform))
+    local stdout_file = platform == "windows" and windows.value(opts.stdout_file, "stdout_file") or opts.stdout_file
+    command = command .. " > " .. (platform == "windows" and windows.quote(stdout_file, "stdout_file") or process.quote(stdout_file, platform))
   end
   if opts.stderr_file then
-    local stderr_file = platform == "windows" and windows_value(opts.stderr_file, "stderr_file") or opts.stderr_file
-    command = command .. " 2> " .. (platform == "windows" and windows_quote(stderr_file, "stderr_file") or process.quote(stderr_file, platform))
+    local stderr_file = platform == "windows" and windows.value(opts.stderr_file, "stderr_file") or opts.stderr_file
+    command = command .. " 2> " .. (platform == "windows" and windows.quote(stderr_file, "stderr_file") or process.quote(stderr_file, platform))
   end
   return command
 end
@@ -184,7 +133,16 @@ function process.capture_run(opts)
 end
 
 function process.b3sum(path)
-  return process.capture("b3sum --no-names " .. process.quote(path))
+  local hash
+  if process.is_windows() then
+    local result = process.capture_run({tool=os.getenv("MOONSTONE_CLI") or os.getenv("MOONSTONE_BIN") or "moon", args={"artifact", "hash", "--", path}})
+    if result.exit_code ~= 0 then error("Moonstone file hashing failed: " .. result.stderr) end
+    hash = result.stdout
+  else
+    hash = process.capture("b3sum --no-names " .. process.quote(path))
+  end
+  if #hash ~= 64 or not hash:match("^[0-9a-f]+$") then error("BLAKE3 hashing failed for " .. path) end
+  return hash
 end
 
 function process.b3sum_string(content)
@@ -193,11 +151,12 @@ function process.b3sum_string(content)
   if f then
     f:write(content)
     f:close()
-    local hash = process.b3sum(tmp)
+    local ok, hash = pcall(process.b3sum, tmp)
     os.remove(tmp)
+    if not ok then error(hash) end
     return hash
   end
-  return ""
+  error("Cannot create temporary file for BLAKE3 hashing")
 end
 
 return process

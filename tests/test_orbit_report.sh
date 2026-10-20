@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-orbit-report.XXXXXX)
@@ -23,9 +24,9 @@ end)
 LUA
 
 cd "$WORK_DIR"
-LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua --lua-path plugins --report .ballad/orbit-report.json > "$WORK_DIR/run.log" 2>&1 || {
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua --lua-path plugins --report .ballad/orbit-report.json > "$WORK_DIR/run.log" 2>&1 || {
   cat "$WORK_DIR/run.log"
   exit 1
 }

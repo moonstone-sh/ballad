@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-pipeline-events.XXXXXX)
@@ -93,4 +94,4 @@ print("PASS: ordinary pipeline nodes emit events and checkpoint for coroutine co
 LUA
 
 cd "$WORK_DIR"
-LUA_PATH="$ROOT/src/?.lua;$ROOT/src/?/init.lua;${LUA_PATH:-}" "${LUA_BIN:-luajit}" test.lua
+LUA_PATH="$ROOT/src/?.lua;$ROOT/src/?/init.lua;${LUA_PATH:-}" "${LUA_BIN:-lua}" test.lua

@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-windows-watcher.XXXXXX)
@@ -23,7 +24,7 @@ process.is_windows = function() return true end
 process.cwd = function() return "C:/fixture" end
 process.capture_run = function(opts)
   calls[#calls + 1] = opts
-  if opts.tool == "moon" then
+  if opts.tool == (os.getenv("MOONSTONE_BIN") or os.getenv("MOONSTONE_CLI") or "moon") then
     assert(table.concat(opts.args, " ") == "provision resolve ballad-watch --json")
     if resolver == "missing" then return { exit_code = 1, stdout = "", stderr = "tool provision unavailable offline" } end
     if resolver == "old" then return { exit_code = 0, stdout = '{"contract":"moonstone:tool-resolve:v0"}', stderr = "" } end
@@ -133,7 +134,7 @@ assert(manifest.reactions[2].label == "assets second")
 assert(table.concat(manifest.output_exclusions, ",")
   == "dist/bootstrap,dist/native-bootstrap,dist/app,dist/native-app,dist/assets,dist/native-assets")
 assert(#calls == 4, "each bridge run must resolve then invoke exactly once")
-assert(calls[1].tool == "moon" and calls[2].tool == "C:/helper/ballad-watch.exe")
+assert(calls[1].tool == (os.getenv("MOONSTONE_BIN") or os.getenv("MOONSTONE_CLI") or "moon") and calls[2].tool == "C:/helper/ballad-watch.exe")
 
 calls = {}
 local once_manifest = run(true)
@@ -173,5 +174,5 @@ print("PASS: Windows watcher bridge emits stable v1 manifests and safely resolve
 LUA
 
 cd "$WORK_DIR"
-LUA_PATH="$ROOT/.moonstone/env/share/lua/5.1/?.lua;$ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;" \
-  "${LUA_BIN:-luajit}" check.lua
+LUA_PATH="$ROOT/.moonstone/env/share/lua/5.4/?.lua;$ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$ROOT/src/?.lua;$ROOT/src/?/init.lua;;" \
+  "${LUA_BIN:-lua}" check.lua

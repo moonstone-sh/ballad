@@ -641,13 +641,31 @@ end
 local function create_tar_gz(ctx, opts, tarball_path, entries)
 	if #entries == 0 then ctx.fail("registry archive selected no files") end
 	local moon_bin = configured_moon_cli(opts)
-	local args = { "artifact", "create", "--out", path.absolute(tarball_path), "--json", "--" }
-	for _, entry in ipairs(entries) do
-		args[#args + 1] = entry.virtual_path
-		args[#args + 1] = path.absolute(entry.source_path)
-		args[#args + 1] = entry.mode
+	local args = { "artifact", "create", "--out", path.absolute(tarball_path), "--json" }
+	local request_path
+	if process.is_windows() then
+		-- cmd.exe has an 8191-character command limit. Pass the closure as data.
+		request_path = path.absolute(tarball_path) .. ".entries.json"
+		local declared = {}
+		for _, entry in ipairs(entries) do
+			declared[#declared + 1] = { virtual_path = entry.virtual_path,
+				source_path = path.absolute(entry.source_path), mode = entry.mode }
+		end
+		local file = assert(io.open(request_path, "wb"))
+		assert(file:write(dkjson.encode({ contract = "moonstone:artifact-entries:v1", entries = declared })))
+		assert(file:close())
+		args[#args + 1] = "--entries-file"
+		args[#args + 1] = request_path
+	else
+		args[#args + 1] = "--"
+		for _, entry in ipairs(entries) do
+			args[#args + 1] = entry.virtual_path
+			args[#args + 1] = path.absolute(entry.source_path)
+			args[#args + 1] = entry.mode
+		end
 	end
 	local result = process.capture_run({ tool = moon_bin, args = args })
+	if request_path then os.remove(request_path) end
 	if result.exit_code ~= 0 then artifact_create_failure(ctx, moon_bin, result) end
 
 	local document, _, decode_error = dkjson.decode(result.stdout)

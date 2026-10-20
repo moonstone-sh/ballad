@@ -2,6 +2,9 @@ local process = require("ballad.process")
 local path = require("ballad.path")
 
 local fs = {}
+local function windows_path(value)
+  return (value:gsub("/", "\\"))
+end
 
 function fs.read_file(file_path)
   local file, err = io.open(file_path, "rb")
@@ -28,7 +31,7 @@ function fs.mkdir(dir_path)
   if dir_path == "" or dir_path == "." then return end
   local command
   if process.is_windows() then
-    command = "if not exist " .. process.quote(dir_path) .. " mkdir " .. process.quote(dir_path)
+    command = "if not exist " .. process.quote(windows_path(dir_path)) .. " mkdir " .. process.quote(windows_path(dir_path))
   else
     command = "mkdir -p " .. process.quote(dir_path)
   end
@@ -43,7 +46,7 @@ function fs.remove_tree(tree_path)
   if unsafe_tree_path(tree_path) then process.fail("refusing to remove unsafe output path") end
   local command
   if process.is_windows() then
-    command = "if exist " .. process.quote(tree_path) .. " rmdir /s /q " .. process.quote(tree_path)
+    command = "if exist " .. process.quote(windows_path(tree_path)) .. " rmdir /s /q " .. process.quote(windows_path(tree_path))
   else
     command = "rm -rf " .. process.quote(tree_path)
   end
@@ -127,13 +130,20 @@ function fs.list_files(root)
   if process.is_windows() then
     -- cmd's dir is present on supported Windows installations and, unlike a
     -- symlink walk, does not require developer mode or elevated privileges.
-    command = "dir /b /s /a:-d " .. process.quote(root) .. " 2>NUL"
+    command = "dir /b /s /a:-d " .. process.quote(windows_path(root)) .. " 2>NUL"
   else
     command = "find " .. process.quote(root) .. " \\( -type f -o -type l \\) -print"
   end
   local pipe = io.popen(command, "r")
   if not pipe then return files end
-  for file_path in pipe:lines() do files[#files + 1] = path.normalize(file_path) end
+  for file_path in pipe:lines() do
+    local normalized = path.normalize(file_path)
+    if process.is_windows() then
+      -- dir /s always emits absolute names; preserve the caller's root shape.
+      normalized = path.join(root, path.relative(normalized, path.absolute(root)))
+    end
+    files[#files + 1] = normalized
+  end
   pipe:close()
   table.sort(files)
   return files
@@ -151,7 +161,7 @@ end
 
 function fs.is_dir(dir_path)
   local command = process.is_windows()
-    and ("if exist " .. process.quote(path.join(dir_path, "NUL")) .. " exit /b 0 else exit /b 1")
+    and ("if exist " .. process.quote(windows_path(dir_path) .. "\\") .. " (exit /b 0) else (exit /b 1)")
     or ("test -d " .. process.quote(dir_path))
   return process.command_ok(command)
 end

@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-source-package.XXXXXX)
@@ -147,10 +148,10 @@ end)
 LUA
 
 cd "$WORK_DIR"
-LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH
 export MOONSTONE_CLI="$WORK_DIR/fake-bin/moon"
-luajit "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture.lua > "$WORK_DIR/run.log" 2>&1 || { cat "$WORK_DIR/run.log"; exit 1; }
 
 test -f dist/registry/meteorite/package.toml || { echo "FAIL: package.toml missing"; exit 1; }
 test -f dist/registry/meteorite/meteorite-1.2.3-source.tar.gz || { echo "FAIL: source tarball missing"; exit 1; }
@@ -170,12 +171,12 @@ grep -Fq 'ldflags = [ "-L$(SQLITE_LIBDIR)" ]' dist/registry/meteorite/package.to
 
 RECIPE_WITH_INCDIR=$(sed -n 's/^recipe_hash = "\([^"]*\)"$/\1/p' dist/registry/meteorite/package.toml)
 sed 's/SQLITE_INCDIR/SQLITE_HEADERS/g; s#dist/registry/meteorite#dist/registry/meteorite-headers#g' partiture.lua > partiture_external_variant.lua
-luajit "$BALLAD_ROOT/src/main.lua" play partiture_external_variant.lua > "$WORK_DIR/run-external-variant.log" 2>&1 || { cat "$WORK_DIR/run-external-variant.log"; exit 1; }
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture_external_variant.lua > "$WORK_DIR/run-external-variant.log" 2>&1 || { cat "$WORK_DIR/run-external-variant.log"; exit 1; }
 RECIPE_WITH_HEADERS=$(sed -n 's/^recipe_hash = "\([^"]*\)"$/\1/p' dist/registry/meteorite-headers/package.toml)
 test "$RECIPE_WITH_INCDIR" != "$RECIPE_WITH_HEADERS" || { echo "FAIL: external path contract did not affect recipe identity"; exit 1; }
 
 sed 's/kind = "include"/kind = "root"/' partiture.lua > partiture_invalid_external.lua
-if luajit "$BALLAD_ROOT/src/main.lua" play partiture_invalid_external.lua > "$WORK_DIR/run-invalid-external.log" 2>&1; then
+if "${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture_invalid_external.lua > "$WORK_DIR/run-invalid-external.log" 2>&1; then
   echo "FAIL: invalid external path kind was accepted"
   exit 1
 fi
@@ -221,7 +222,7 @@ return ballad.partiture(function(p)
 end)
 LUA
 
-luajit "$BALLAD_ROOT/src/main.lua" play partiture_project.lua > "$WORK_DIR/run-project.log" 2>&1 || { cat "$WORK_DIR/run-project.log"; exit 1; }
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture_project.lua > "$WORK_DIR/run-project.log" 2>&1 || { cat "$WORK_DIR/run-project.log"; exit 1; }
 test -f dist/registry/meteorite-project/package.toml || { echo "FAIL: project input package.toml missing"; exit 1; }
 grep -q 'version = "1.2.3"' dist/registry/meteorite-project/package.toml || { echo "FAIL: project version not used"; exit 1; }
 grep -A4 '^\[\[dependencies\]\]$' dist/registry/meteorite-project/package.toml | grep -q 'name = "user/runtime"' || { echo "FAIL: source descriptor omitted runtime dependency"; cat dist/registry/meteorite-project/package.toml; exit 1; }
@@ -254,7 +255,7 @@ return ballad.partiture(function(p)
 end)
 LUA
 
-luajit "$BALLAD_ROOT/src/main.lua" play partiture_conventional.lua > "$WORK_DIR/run-conventional.log" 2>&1 || { cat "$WORK_DIR/run-conventional.log"; exit 1; }
+"${LUA_BIN:-lua}" "$BALLAD_ROOT/src/main.lua" play partiture_conventional.lua > "$WORK_DIR/run-conventional.log" 2>&1 || { cat "$WORK_DIR/run-conventional.log"; exit 1; }
 test -f dist/registry/meteorite-conventional/package.toml || { echo "FAIL: conventional package.toml missing"; exit 1; }
 grep -q 'name = "user/meteorite"' dist/registry/meteorite-conventional/package.toml || { echo "FAIL: conventional package name was not inferred"; exit 1; }
 grep -q 'version = "1.2.3"' dist/registry/meteorite-conventional/package.toml || { echo "FAIL: conventional package version was not inferred"; exit 1; }

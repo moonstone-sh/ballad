@@ -245,8 +245,9 @@ features. Watchers use a separately provisioned native helper described below.
 With `--jobs > 1`, native tasks run sequentially on Windows rather than being
 backgrounded.
 
-Ballad's CI validates Windows path and launcher serialization, not execution on
-a native Windows runner.
+Ballad has native Windows x64 task, filesystem, export and relocated-launcher
+checks. See [the Windows host contract](docs/WINDOWS.md) for the exact scope and
+remaining toolchain boundaries.
 
 ## Executable Tool Export
 
@@ -300,7 +301,7 @@ end)
 
 `moonstone.orbit("name")` only addresses an immediate child. Its
 `:partiture(path):run(opts)` invocation resolves the member through Moonstone,
-synchronizes it when requested, and executes `ballad play` through `moon orbit exec`. That preserves
+synchronizes it when requested, and executes `ballad play` through `moon --orbit <name> exec`. That preserves
 the child working directory, interpreter, tool closure, and native-module ABI
 scope. The returned handle is a **product catalog**, not an asset set: select a
 child-declared product before any parent sink, layout, or package can consume it.
@@ -362,7 +363,8 @@ it does not merge sibling tool scopes or native modules across interpreter
 boundaries.
 
 Use `sync = "locked"` for reproducible exports. It requires the child lockfile
-to be current. `sync = "update"` is for intentionally lockless examples and
+to be current. Synchronization runs before consulting the child export cache;
+a sync failure prevents the export. `sync = "update"` is for intentionally lockless examples and
 development projects; it refreshes the child environment and is non-cacheable
 by default. `sync = "never"` requires a previously synchronized child.
 
@@ -593,7 +595,7 @@ asset set. The sink owns the whole directory; keep handwritten files elsewhere.
 Destination paths must stay inside that directory, and symlink destinations are
 rejected. Omitting `incremental` keeps the existing replace-directory behavior.
 
-Task cache keys include transformed content, paths, asset kinds and metadata.
+Task cache keys include transformed content, paths, asset kinds, metadata, and the resolved host/target build context.
 Native input globs such as `src/**/*.lua` include direct children and nested
 files. Cached outputs are checked against content snapshots, including directory
 file membership, so missing or modified outputs trigger regeneration. Declare

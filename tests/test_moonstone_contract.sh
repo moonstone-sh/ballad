@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-moonstone-contract.XXXXXX)
@@ -44,8 +45,8 @@ esac
 SH
 chmod +x "$WORK_DIR/moon"
 
-EXPECTED_PROJECT_ROOT="$WORK_DIR/project" LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;" \
-  "${LUA_BIN:-luajit}" - "$WORK_DIR/project" "$WORK_DIR/moon" <<'LUA'
+EXPECTED_PROJECT_ROOT="$WORK_DIR/project" LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;" \
+  "${LUA_BIN:-lua}" - "$WORK_DIR/project" "$WORK_DIR/moon" <<'LUA'
 local project = require("ballad.project")
 local loaded = project.load(arg[1], { moon = arg[2] })
 

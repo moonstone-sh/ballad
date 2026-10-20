@@ -19,7 +19,7 @@ end)
 LUA
 
 cd "$WORK_DIR"
-"${LUA_BIN:-luajit}" "$ROOT/src/main.lua" play partiture.lua -- --mode hybrid_dev --backend fast_http >/tmp/ballad-invocation-test.log 2>&1 || {
+"${LUA_BIN:-lua}" "$ROOT/src/main.lua" play partiture.lua -- --mode hybrid_dev --backend fast_http >/tmp/ballad-invocation-test.log 2>&1 || {
   cat /tmp/ballad-invocation-test.log
   exit 1
 }

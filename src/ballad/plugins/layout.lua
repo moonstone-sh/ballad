@@ -93,27 +93,6 @@ local function lua_path_prefixes(roots)
   return table.concat(prefixes, ";")
 end
 
-local function selected_package_roots(meta, names)
-  if not names then return nil end
-  local selected = {}
-  for _, name in ipairs(names) do selected[name] = true end
-  local roots = {}
-  for _, package in ipairs(meta.packages or {}) do
-    if selected[package.name] and package.artifact_path then
-      table.insert(roots, package.artifact_path)
-    end
-  end
-  return roots
-end
-
-local function source_is_in_roots(source, roots)
-  if not roots then return true end
-  for _, root in ipairs(roots) do
-    if source == root or source:sub(1, #root + 1) == root .. "/" then return true end
-  end
-  return false
-end
-
 local function directory_destination(value)
   if type(value) ~= "string" then error("layout.directory entries require a string .to destination") end
   if value == "" or value == "." then return "" end
@@ -177,7 +156,7 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
   local runnable = opts.runnable
   if runnable == nil then runnable = true end
   local lua_paths = opts.lua_paths or { "lua", "src" }
-  local package_roots = selected_package_roots(meta, opts.packages)
+  local selected_package = require("ballad.package_selection").new(meta, opts.packages)
   local files = {}
   local destinations = {}
   local function add_file(task)
@@ -199,7 +178,7 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
       if fs.is_lua(module_path) then
         local relative = path.relative(module_path, module_root)
         local source = fs.readlink(module_path)
-        if should_export(relative, source) and source_is_in_roots(source, package_roots) then
+        if should_export(relative, source) and selected_package(source, relative, "lua_modules") then
           add_file({ src = source, dest = libexec_root .. "/lua/" .. relative, kind = "package" })
         end
       end
@@ -211,7 +190,7 @@ local function build_libexec_layout(ctx, inputs, opts, method_name, layout_name)
       if fs.is_binary_module(module_path) then
         local relative = path.relative(module_path, lib_module_root)
         local source = fs.readlink(module_path)
-        if should_export(relative, source) and source_is_in_roots(source, package_roots) then
+        if should_export(relative, source) and selected_package(source, relative, "lua_cmodules") then
           add_file({ src = source, dest = libexec_root .. "/lib/" .. relative, kind = "package" })
         end
       end

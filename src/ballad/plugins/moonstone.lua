@@ -99,39 +99,7 @@ local function runtime_from_dependencies(root, env_rt)
   return nil
 end
 
-local function query_current_runtime(root, moon_bin)
-  local result = process.capture_run({
-    tool = moon_bin or "moon",
-    args = { "interpreter", "path", "--current", "--json" },
-    cwd = root,
-  })
-  local output = result.exit_code == 0 and result.stdout or ""
-  if output == "" then
-    result = process.capture_run({
-      tool = moon_bin or "moon",
-      args = { "runtime", "path", "--current", "--json" },
-      cwd = root,
-    })
-    output = result.exit_code == 0 and result.stdout or ""
-  end
-  if output == "" then return nil end
-  local decoded = dkjson.decode(output)
-  if type(decoded) ~= "table" then return nil end
-  return decoded
-end
-
-local function query_runtime_artifact(moon_bin, artifact_hash)
-  if not artifact_hash or artifact_hash == "" then return nil end
-  local result = process.capture_run({
-    tool = moon_bin or "moon",
-    args = { "store", "query", "--by-artifact-hash", artifact_hash, "--json" },
-  })
-  local output = result.exit_code == 0 and result.stdout or ""
-  if output == "" then return nil end
-  local decoded = dkjson.decode(output)
-  if type(decoded) ~= "table" or type(decoded[1]) ~= "table" then return nil end
-  return decoded[1]
-end
+local query_runtime_artifact = require("ballad.moonstone_store").artifact
 
 local function hydrate_runtime(loaded, opts)
   opts = opts or {}
@@ -139,9 +107,9 @@ local function hydrate_runtime(loaded, opts)
   local name = env_rt.name or "lua"
   local version = env_rt.version or "5.1"
   local dep = runtime_from_dependencies(loaded.root, env_rt) or {}
-  local query = query_current_runtime(loaded.root, opts.moon or opts.moon_bin or "moon") or {}
+  local query = {}
   local artifact_hash = dep.artifact_hash or query.artifact_hash
-  local store_query = query_runtime_artifact(opts.moon or opts.moon_bin or "moon", artifact_hash) or {}
+  local store_query = query_runtime_artifact(loaded.moon_bin, artifact_hash) or {}
   local artifact_path = dep.path or query.path
   local files_root = artifact_path and path.join(artifact_path, "files") or nil
   local bin = files_root and runtime_bin_map(files_root) or {}
@@ -276,12 +244,8 @@ local function tool_scope_assets(ctx, project_asset, opts)
 end
 
 local function canonical_dir(value)
-  if not process.command_ok("test -d " .. process.quote(value)) then
-    error("moonstone.orbit: directory does not exist: " .. value)
-  end
-  local resolved = process.capture("cd " .. process.quote(value) .. " && pwd -P")
-  if resolved == "" then error("moonstone.orbit: cannot resolve directory: " .. value) end
-  return resolved
+  if not fs.is_dir(value) then error("moonstone.orbit: directory does not exist: " .. value) end
+  return require("ballad.realpath").resolve(value)
 end
 
 local function resolve_orbit(root, name, moon_bin)
@@ -298,7 +262,7 @@ local function resolve_orbit(root, name, moon_bin)
   end
 
   local child = canonical_dir(path.join(root, current.path))
-  if child ~= root and child:sub(1, #root + 1) ~= root .. "/" then
+  if not path.contains(root, child) then
     error("moonstone.orbit: orbit path escapes the root project: " .. current.path)
   end
   if not fs.read_file(path.join(child, "moonstone.toml")) then
@@ -367,7 +331,7 @@ local function child_lua_paths(root, child_root, lua_paths)
   for _, value in ipairs(lua_paths or {}) do
     if type(value) ~= "string" or value == "" then error("moonstone.orbit: lua_paths must be child-relative directories") end
     local resolved = canonical_dir(path.join(child_root, value))
-    if resolved ~= root and resolved:sub(1, #root + 1) ~= root .. "/" then
+    if not path.contains(root, resolved) then
       error("moonstone.orbit: lua_path escapes the parent project: " .. value)
     end
     result[#result + 1] = value
@@ -539,7 +503,7 @@ return {
     local runtime_record = hydrate_runtime(loaded, opts)
     local packages = moonstone_input.enrich_packages(loaded.packages, {
       roles = opts.roles or { "runtime", "peer", "optional", "tool", "dev", "helper" },
-      moon = opts.moon or opts.moon_bin or "moon",
+      moon = loaded.moon_bin,
     })
     -- An explicit package README wins. Otherwise prefer a registry-facing
     -- README, then use the repository README as a useful fallback.
@@ -625,7 +589,7 @@ return {
     local assets = graph.AssetSet.new()
     local packages = moonstone_input.enrich_packages(loaded.packages, {
       roles = opts.roles or { "runtime" },
-      moon = opts.moon or opts.moon_bin or "moon",
+      moon = loaded.moon_bin,
     })
     local runtime_record = hydrate_runtime(loaded, opts)
     local asset = ctx.graph:add_asset({
@@ -679,10 +643,9 @@ return {
     opts = opts or {}
     local script = opts.script or opts[1] or error("moonstone.run: missing script name")
     local moon_bin = find_moon_cli(opts)
-    local cmd = process.quote(moon_bin) .. " run " .. script
     local task_opts = {
       id = opts.id or ("moonstone.run:" .. script),
-      cmd = cmd,
+      args = { "run", script },
       tool = moon_bin,
       inputs = opts.inputs or {},
       outputs = opts.outputs or {},
@@ -714,9 +677,12 @@ return {
     local cmd_or_args = opts.cmd or opts.args or opts[1] or error("moonstone.exec: missing command")
     local moon_bin = find_moon_cli(opts)
     local command_str
+    local args
     if type(cmd_or_args) == "table" then
       local parts = {}
+      args = { "exec", "--" }
       for _, p in ipairs(cmd_or_args) do
+        table.insert(args, p)
         table.insert(parts, process.quote(p))
       end
       command_str = table.concat(parts, " ")
@@ -726,7 +692,8 @@ return {
     local cmd = process.quote(moon_bin) .. " exec " .. command_str
     local task_opts = {
       id = opts.id or "moonstone.exec",
-      cmd = cmd,
+      cmd = not args and cmd or nil,
+      args = args,
       tool = moon_bin,
       inputs = opts.inputs or {},
       outputs = opts.outputs or {},
@@ -771,34 +738,32 @@ return {
     local args = opts.args or {}
     local invocation = invocation_fingerprint(orbit_name, child_root, partiture_file, args, lua_paths)
     local report_path = path.join(child_root, ".ballad", "exports", invocation .. ".json")
-    local command = "set -eu; "
+    local task_id = opts.id or ("moonstone.orbit:" .. orbit_name)
     if sync_mode ~= "never" then
-      command = command .. process.quote(moon_bin) .. " orbit sync " .. process.quote(orbit_name) .. " --" .. sync_mode .. "; "
+      ctx:native_task({
+        id = task_id .. ":sync", tool = moon_bin,
+        args = { "--orbit", orbit_name, "sync", "--" .. sync_mode },
+        cwd = root, cacheable = false, parallel_safe = false,
+        description = "sync orbit " .. orbit_name,
+      })
     end
-    command = command
-      .. "BALLAD_ORBIT_NAME=" .. process.quote(orbit_name)
-      .. " BALLAD_EXPORT_FINGERPRINT=" .. process.quote(invocation)
-      .. " " .. process.quote(moon_bin) .. " orbit exec " .. process.quote(orbit_name)
-      .. " -- ballad play " .. process.quote(partiture_file)
+    local command_args = { "--orbit", orbit_name, "exec", "--", "ballad", "play", partiture_file }
     for _, lua_path in ipairs(lua_paths) do
-      command = command .. " --lua-path " .. process.quote(lua_path)
+      command_args[#command_args + 1] = "--lua-path"
+      command_args[#command_args + 1] = lua_path
     end
-    command = command
-      .. " --report " .. process.quote(path.relative(report_path, child_root))
+    command_args[#command_args + 1] = "--report"
+    command_args[#command_args + 1] = path.relative(report_path, child_root)
     if #args > 0 then
-      -- `moon orbit exec <orbit> --` has already consumed its command
-      -- separator above. Everything that follows is passed straight to the
-      -- child command, so Ballad needs exactly one separator for its own
-      -- invocation arguments. A second one becomes a spurious first argument
-      -- in the child's partiture.
-      command = command .. " --"
-      for _, value in ipairs(args) do command = command .. " " .. process.quote(value) end
+      command_args[#command_args + 1] = "--"
+      for _, value in ipairs(args) do command_args[#command_args + 1] = value end
     end
 
     ctx:native_task({
-      id = opts.id or ("moonstone.orbit:" .. orbit_name),
-      tool = "sh",
-      args = { "-c", command },
+      id = task_id,
+      tool = moon_bin,
+      args = command_args,
+      env = { BALLAD_ORBIT_NAME = orbit_name, BALLAD_EXPORT_FINGERPRINT = invocation },
       inputs = orbit_input_paths(child_root, partiture_file, opts.inputs or {}, report_path),
       outputs = { report_path },
       cwd = root,

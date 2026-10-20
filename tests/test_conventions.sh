@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+unset LUA_PATH_5_4 LUA_CPATH_5_4
 
 BALLAD_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK_DIR=$(mktemp -d /tmp/ballad-conventions.XXXXXX)
@@ -14,10 +15,10 @@ printf '%s\n' 'return {}' > "$WORK_DIR/project/src/core/init.lua"
 printf '%s\n' 'ignored' > "$WORK_DIR/project/src/core/debug.tmp"
 printf '%s\n' '---@class PackageOptions' > "$WORK_DIR/project/types/package.d.lua"
 
-LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.1/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
+LUA_PATH="$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?.lua;$BALLAD_ROOT/.moonstone/env/share/lua/5.4/?/init.lua;$BALLAD_ROOT/src/?.lua;$BALLAD_ROOT/src/?/init.lua;;"
 export LUA_PATH BALLAD_CONVENTIONS_FIXTURE="$WORK_DIR/project"
 
-luajit - <<'LUA'
+"${LUA_BIN:-lua}" - <<'LUA'
 local conventions = require("ballad").conventions
 local root = assert(os.getenv("BALLAD_CONVENTIONS_FIXTURE"))
 local project = {

@@ -40,7 +40,7 @@ local function observed_inputs(pipeline, root)
 end
 
 local function write_report(report_path, partiture_file, results, pipeline, invocation_args)
-  local root = process.capture("pwd -P")
+  local root = path.normalize(process.cwd())
   local sinks = {}
   for index, sink in ipairs(results) do
     local assets = {}
@@ -80,6 +80,7 @@ local function write_report(report_path, partiture_file, results, pipeline, invo
     invocation = {
       fingerprint = os.getenv("BALLAD_EXPORT_FINGERPRINT"),
       orbit = os.getenv("BALLAD_ORBIT_NAME"),
+      build_context = require("ballad.cache").build_context(),
       args = invocation_args or {},
       graph_fingerprint = "b3:" .. process.b3sum_string(pipeline._graph:to_json()),
       inputs = observed_inputs(pipeline, root),
