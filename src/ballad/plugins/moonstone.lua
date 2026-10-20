@@ -107,7 +107,7 @@ local function hydrate_runtime(loaded, opts)
   local name = env_rt.name or "lua"
   local version = env_rt.version or "5.1"
   local dep = runtime_from_dependencies(loaded.root, env_rt) or {}
-  local query = query_current_runtime(loaded.root, opts.moon or opts.moon_bin or "moon") or {}
+  local query = {}
   local artifact_hash = dep.artifact_hash or query.artifact_hash
   local store_query = query_runtime_artifact(loaded.moon_bin, artifact_hash) or {}
   local artifact_path = dep.path or query.path
