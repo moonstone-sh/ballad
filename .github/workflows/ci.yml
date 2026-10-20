@@ -48,6 +48,7 @@ jobs:
             python3 tests/test_framework_flavors.py
             lua tests/test_store_contract.lua
             lua tests/test_package_selection.lua
+            lua tests/test_moonstone_tasks.lua
             ./tests/test_incremental.sh
             ./tests/test_flavors.sh
             ./tests/test_pipeline_progress_events.sh

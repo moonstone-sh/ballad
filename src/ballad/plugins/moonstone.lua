@@ -643,10 +643,9 @@ return {
     opts = opts or {}
     local script = opts.script or opts[1] or error("moonstone.run: missing script name")
     local moon_bin = find_moon_cli(opts)
-    local cmd = process.quote(moon_bin) .. " run " .. script
     local task_opts = {
       id = opts.id or ("moonstone.run:" .. script),
-      cmd = cmd,
+      args = { "run", script },
       tool = moon_bin,
       inputs = opts.inputs or {},
       outputs = opts.outputs or {},
@@ -678,9 +677,12 @@ return {
     local cmd_or_args = opts.cmd or opts.args or opts[1] or error("moonstone.exec: missing command")
     local moon_bin = find_moon_cli(opts)
     local command_str
+    local args
     if type(cmd_or_args) == "table" then
       local parts = {}
+      args = { "exec", "--" }
       for _, p in ipairs(cmd_or_args) do
+        table.insert(args, p)
         table.insert(parts, process.quote(p))
       end
       command_str = table.concat(parts, " ")
@@ -690,7 +692,8 @@ return {
     local cmd = process.quote(moon_bin) .. " exec " .. command_str
     local task_opts = {
       id = opts.id or "moonstone.exec",
-      cmd = cmd,
+      cmd = not args and cmd or nil,
+      args = args,
       tool = moon_bin,
       inputs = opts.inputs or {},
       outputs = opts.outputs or {},
