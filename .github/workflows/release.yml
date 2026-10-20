@@ -53,7 +53,7 @@ jobs:
           echo "$GITHUB_WORKSPACE/.ci/moonstone/zig-out/bin" >> "$GITHUB_PATH"
       - name: Synchronize and export tagged Ballad
         run: |
-          moon sync --locked
+          moon sync --target x86_64-linux-gnu
           moon exec -- sh tests/test_incremental.sh
           moon run play
       - name: Verify tag version
