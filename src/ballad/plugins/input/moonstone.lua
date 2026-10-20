@@ -39,19 +39,7 @@ end
 ---@param artifact_hash string|nil
 ---@return table|nil result
 ---@return string|nil err
-local function query_artifact(moon_bin, artifact_hash)
-  if not artifact_hash or artifact_hash == "" then return nil, "missing artifact_hash" end
-  local result = process.capture_run({
-    tool = moon_bin or "moon",
-    args = { "store", "query", "--by-artifact-hash", artifact_hash, "--json" },
-  })
-  local output = result.exit_code == 0 and result.stdout or ""
-  if output == "" then return nil, "empty moon store query output" end
-  local decoded, _, err = dkjson.decode(output)
-  if not decoded then return nil, err or "invalid moon store query JSON" end
-  if type(decoded) ~= "table" or #decoded == 0 then return nil, "artifact not found in local store" end
-  return decoded[1], nil
-end
+local query_artifact = require("ballad.moonstone_store").artifact
 
 ---@param package table
 ---@return table
@@ -67,7 +55,7 @@ end
 function input.enrich_packages(packages, opts)
   opts = opts or {}
   local roles = opts.roles or { "runtime" }
-  local moon_bin = opts.moon or opts.moon_bin or "moon"
+  local moon_bin = opts.moon or opts.moon_bin or os.getenv("MOONSTONE_CLI") or os.getenv("MOONSTONE_BIN") or "moon"
   local enriched = {}
 
   for _, package in ipairs(packages or {}) do
@@ -89,7 +77,7 @@ function input.enrich_packages(packages, opts)
         out.store_warnings = query.warnings or {}
       else
         out.store_warnings = {
-          { code = "store_query_failed", message = err or "moon store query failed" },
+          { code = "store_query_failed", message = err or "moon store list failed" },
         }
       end
       enriched[#enriched + 1] = out

@@ -135,7 +135,7 @@ end
 function process.b3sum(path)
   local hash
   if process.is_windows() then
-    local result = process.capture_run({tool="moon", args={"artifact", "hash", "--", path}})
+    local result = process.capture_run({tool=os.getenv("MOONSTONE_CLI") or os.getenv("MOONSTONE_BIN") or "moon", args={"artifact", "hash", "--", path}})
     if result.exit_code ~= 0 then error("Moonstone file hashing failed: " .. result.stderr) end
     hash = result.stdout
   else

@@ -99,39 +99,7 @@ local function runtime_from_dependencies(root, env_rt)
   return nil
 end
 
-local function query_current_runtime(root, moon_bin)
-  local result = process.capture_run({
-    tool = moon_bin or "moon",
-    args = { "interpreter", "path", "--current", "--json" },
-    cwd = root,
-  })
-  local output = result.exit_code == 0 and result.stdout or ""
-  if output == "" then
-    result = process.capture_run({
-      tool = moon_bin or "moon",
-      args = { "runtime", "path", "--current", "--json" },
-      cwd = root,
-    })
-    output = result.exit_code == 0 and result.stdout or ""
-  end
-  if output == "" then return nil end
-  local decoded = dkjson.decode(output)
-  if type(decoded) ~= "table" then return nil end
-  return decoded
-end
-
-local function query_runtime_artifact(moon_bin, artifact_hash)
-  if not artifact_hash or artifact_hash == "" then return nil end
-  local result = process.capture_run({
-    tool = moon_bin or "moon",
-    args = { "store", "query", "--by-artifact-hash", artifact_hash, "--json" },
-  })
-  local output = result.exit_code == 0 and result.stdout or ""
-  if output == "" then return nil end
-  local decoded = dkjson.decode(output)
-  if type(decoded) ~= "table" or type(decoded[1]) ~= "table" then return nil end
-  return decoded[1]
-end
+local query_runtime_artifact = require("ballad.moonstone_store").artifact
 
 local function hydrate_runtime(loaded, opts)
   opts = opts or {}
@@ -141,7 +109,7 @@ local function hydrate_runtime(loaded, opts)
   local dep = runtime_from_dependencies(loaded.root, env_rt) or {}
   local query = query_current_runtime(loaded.root, opts.moon or opts.moon_bin or "moon") or {}
   local artifact_hash = dep.artifact_hash or query.artifact_hash
-  local store_query = query_runtime_artifact(opts.moon or opts.moon_bin or "moon", artifact_hash) or {}
+  local store_query = query_runtime_artifact(loaded.moon_bin, artifact_hash) or {}
   local artifact_path = dep.path or query.path
   local files_root = artifact_path and path.join(artifact_path, "files") or nil
   local bin = files_root and runtime_bin_map(files_root) or {}
@@ -535,7 +503,7 @@ return {
     local runtime_record = hydrate_runtime(loaded, opts)
     local packages = moonstone_input.enrich_packages(loaded.packages, {
       roles = opts.roles or { "runtime", "peer", "optional", "tool", "dev", "helper" },
-      moon = opts.moon or opts.moon_bin or "moon",
+      moon = loaded.moon_bin,
     })
     -- An explicit package README wins. Otherwise prefer a registry-facing
     -- README, then use the repository README as a useful fallback.
@@ -621,7 +589,7 @@ return {
     local assets = graph.AssetSet.new()
     local packages = moonstone_input.enrich_packages(loaded.packages, {
       roles = opts.roles or { "runtime" },
-      moon = opts.moon or opts.moon_bin or "moon",
+      moon = loaded.moon_bin,
     })
     local runtime_record = hydrate_runtime(loaded, opts)
     local asset = ctx.graph:add_asset({
